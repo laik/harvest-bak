@@ -5,7 +5,28 @@ authors = ["laik <laik.lj@me.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies.common]
+path = "./common"
+
+[dependencies.filter]
+path = "./filter"
+
+[dependencies.db]
+path = "./db"
+
+[dependencies.scan]
+path = "./scan"
+
+[dependencies.event]
+path = "./event"
+
+[dependencies.output]
+path = "./output"
+
 
 [dependencies]
 structopt = { version = "0.3", features = ["paw"] }
 paw = "1.0"
+rocket = "0.4.7"
+rocket_contrib = "0.4.7"
+serde = "1.0.123"

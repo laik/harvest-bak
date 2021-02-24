@@ -1,4 +1,7 @@
-use harvest::{Database, EventHandler, RpcServer};
+use common::Result;
+use db::Database;
+use event::EventHandler;
+use harvest::Harvest;
 use std::sync::Arc;
 use structopt::StructOpt;
 
@@ -8,24 +11,15 @@ pub struct ServerOptions {
     #[structopt(short, long)]
     namespace: String,
 
-    // short and long flags (-p, --path) will be deduced from the field's name
-    #[structopt(short = "a", long)]
-    addrs: String,
-
-    // short and long flags (-p, --path) will be deduced from the field's name
-    #[structopt(short = "p", long)]
-    path: String,
+    // short and long flags (-d, --dir) will be deduced from the field's name
+    #[structopt(short = "d", long)]
+    dir: String,
 }
-// cargo run -- --namespace xx --addrs 0.0.0.0:8080 --path /var/log/container
+// cargo run -- --namespace xx --path /var/log/container
 
-fn main() {
+fn main() -> Result<()> {
     // let opt = ServerOptions::from_args();
     // println!("{:?}", opt);
-    let event_handler = EventHandler::new();
 
-    let server = RpcServer::new(
-        "127.0.0.1:8080".parse().unwrap(),
-        Arc::new(Database::new(event_handler)),
-    );
-    server.listen();
+    Harvest::new("default".to_owned(), "/var/log/pods".to_owned()).start()
 }
