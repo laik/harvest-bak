@@ -1,8 +1,11 @@
 use common::Result;
 use event::EventHandler;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::convert::AsRef;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use strum::AsRefStr;
 
 #[derive(AsRefStr, Debug)]
@@ -68,8 +71,16 @@ impl Database {
         self.pods.get(&*uuid)
     }
 
-    pub fn get_by_pod(&self, pod: String) -> Option<&Pod> {
-        match self.pods.iter().find(|(_, v)| v.pod_name == pod) {
+    pub fn incr_offset_by_uuid(&mut self, uuid: String, incr_size: usize) {
+        self.pods.get_mut(&uuid).unwrap().offset += incr_size
+    }
+
+    pub fn get_by_pod(&self, namespace: String, pod: String) -> Option<&Pod> {
+        match self
+            .pods
+            .iter()
+            .find(|(_, v)| v.namespace == namespace && v.pod_name == pod)
+        {
             None => None,
             Some((_, pod)) => Some(pod),
         }
@@ -82,6 +93,17 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_by_namespace_pod(&mut self, namespace: String, pod: String) -> Result<()> {
+        if let Some((uuid, _)) = self
+            .pods
+            .iter()
+            .find(|(_, v)| v.namespace == namespace && v.pod_name == pod)
+        {
+            return self.delete((*&uuid).to_string());
+        };
+        Ok(())
+    }
+
     pub fn delete(&mut self, uuid: String) -> Result<()> {
         match self.pods.get(&*uuid) {
             Some(pod) => {
@@ -89,7 +111,7 @@ impl Database {
                     .event(Event::Delete.as_ref().to_string(), pod.clone());
                 self.pods.remove(&*uuid);
             }
-            None => {}
+            _ => {}
         }
         Ok(())
     }
@@ -100,6 +122,10 @@ impl Database {
         self.pods.insert(uuid, pod);
         Ok(())
     }
+}
+
+pub fn new_sync_database(db: Database) -> Arc<Mutex<Database>> {
+    Arc::new(Mutex::new(db))
 }
 
 #[cfg(test)]

@@ -1,7 +1,11 @@
 use common::Result;
+use db::Database;
 use event::EventHandler;
 use notify::{watcher, DebouncedEvent, RecursiveMode, Watcher};
-use std::{sync::mpsc::channel, time::Duration};
+use std::{
+    sync::{mpsc::channel, Arc, Mutex},
+    time::Duration,
+};
 use strum::AsRefStr;
 
 #[derive(Debug, AsRefStr, Clone)]
@@ -29,19 +33,29 @@ unsafe impl Send for PathEventInfo {}
 pub struct AutoScanner {
     namespace: String,
     dir: String,
+    db: Arc<Mutex<Database>>,
 }
 
 impl AutoScanner {
-    pub fn new(namespace: String, dir: String) -> Self {
-        Self { namespace, dir }
+    pub fn new(namespace: String, dir: String, db: Arc<Mutex<Database>>) -> Self {
+        Self { namespace, dir, db }
     }
 
+    //TODO
     fn parse_to_event_info(namespace: String, path: String) -> Option<PathEventInfo> {
-        None
+        Some(PathEventInfo {
+            namespace,
+            pod: "".to_string(),
+            container: "".to_string(),
+            path,
+        })
     }
 
     // 首先list符合namespace的目录，然后watch目录的变更
-    pub fn start(&self, event_handler: EventHandler<PathEventInfo>) -> Result<()> {
+    pub fn start(
+        &self,
+        path_event_handler: EventHandler<(PathEventInfo, Arc<Mutex<Database>>)>,
+    ) -> Result<()> {
         println!("auto_scanner start");
         // Create a channel to receive the events.
         let (tx, rx) = channel();
@@ -66,8 +80,10 @@ impl AutoScanner {
                                 path_str.to_owned(),
                             ) {
                                 Some(pei) => {
-                                    event_handler
-                                        .event(PathEvent::NeedOpen.as_ref().to_owned(), pei);
+                                    path_event_handler.event(
+                                        PathEvent::NeedOpen.as_ref().to_owned(),
+                                        (pei, self.db.clone()),
+                                    );
                                 }
                                 _ => {}
                             }
@@ -80,8 +96,10 @@ impl AutoScanner {
                                 path_str.to_owned(),
                             ) {
                                 Some(pei) => {
-                                    event_handler
-                                        .event(PathEvent::NeedWrite.as_ref().to_owned(), pei);
+                                    path_event_handler.event(
+                                        PathEvent::NeedWrite.as_ref().to_owned(),
+                                        (pei, self.db.clone()),
+                                    );
                                 }
                                 _ => {}
                             }
@@ -94,8 +112,10 @@ impl AutoScanner {
                                 path_str.to_owned(),
                             ) {
                                 Some(pei) => {
-                                    event_handler
-                                        .event(PathEvent::NeedClose.as_ref().to_owned(), pei);
+                                    path_event_handler.event(
+                                        PathEvent::NeedClose.as_ref().to_owned(),
+                                        (pei, self.db.clone()),
+                                    );
                                 }
                                 _ => {}
                             }
@@ -153,35 +173,42 @@ fn parse_pod_for_path(dir: String, path: String) -> Option<ParsePodForPath> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
 
     use crate::{AutoScanner, PathEvent, PathEventInfo};
+    use db::Database;
     use event::EventHandler;
 
     #[test]
     fn it_works() {
         trait Handle: Sync + Send {
-            fn handle(&self, pei: PathEventInfo) {
+            fn handle(&self, pei: PathEventInfo, db: Arc<Mutex<Database>>) {
                 println!("mock listener {:?}", pei);
             }
         }
 
-        let auto_scanner = AutoScanner::new("default".to_owned(), "".to_owned());
         let maps = Arc::new(HashMap::<String, Arc<dyn Handle>>::new());
-        // new a event_handler registry mock action events handle
-        let mut event_handler = EventHandler::new();
 
-        event_handler.registry(
+        let datanase = Arc::new(Mutex::new(Database::new(EventHandler::new())));
+        let auto_scanner = AutoScanner::new("default".to_owned(), "".to_owned(), datanase.clone());
+
+        // new a event_handler registry mock action events handle
+        let mut path_event_handler = EventHandler::<(PathEventInfo, Arc<Mutex<Database>>)>::new();
+
+        path_event_handler.registry(
             PathEvent::NeedClose.as_ref().to_owned(),
-            move |pei: PathEventInfo| {
+            move |(pei, db)| {
                 if let Some(h) = maps.get(&pei.path) {
-                    h.handle(pei);
+                    h.handle(pei, db);
                 }
             },
         );
 
         // start but this was occurred "No path was found."
-        if let Err(e) = auto_scanner.start(event_handler) {
+        if let Err(e) = auto_scanner.start(path_event_handler) {
             assert_eq!("No path was found.", e.to_string());
         }
     }

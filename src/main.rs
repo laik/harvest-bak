@@ -1,8 +1,5 @@
 use common::Result;
-use db::Database;
-use event::EventHandler;
 use harvest::Harvest;
-use std::sync::Arc;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -21,5 +18,9 @@ fn main() -> Result<()> {
     // let opt = ServerOptions::from_args();
     // println!("{:?}", opt);
 
-    Harvest::new("default".to_owned(), "/var/log/pods".to_owned()).start()
+    Harvest::new(
+        "default".to_owned(),
+        "/Users/dxp/workspace/go/src/github.com/laik/harvest/tmp".to_owned(),
+    )
+    .start()
 }

@@ -23,6 +23,8 @@ path = "./event"
 [dependencies.output]
 path = "./output"
 
+[dependencies.file]
+path = "./file"
 
 [dependencies]
 structopt = { version = "0.3", features = ["paw"] }
