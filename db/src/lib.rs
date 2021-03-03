@@ -1,6 +1,6 @@
 mod database;
 
-pub use database::{new_sync_database, Database, Event, Pod};
+pub use database::{new_sync_database, Database, Event, GetPod, Pod};
 
 #[cfg(test)]
 mod tests {

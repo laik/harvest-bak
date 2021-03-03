@@ -1,4 +1,8 @@
+pub mod obj;
+pub use obj::{Dispatch, Listener};
+
 use std::collections::HashMap;
+
 pub struct EventHandler<T: Clone> {
     listeners: HashMap<String, Vec<Box<dyn Fn(T) + Send + Sync>>>,
 }

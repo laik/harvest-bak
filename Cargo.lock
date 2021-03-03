@@ -1021,6 +1021,7 @@ dependencies = [
  "event",
  "notify",
  "strum",
+ "walkdir",
 ]
 
 [[package]]

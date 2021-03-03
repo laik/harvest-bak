@@ -26,7 +26,7 @@ impl<T: IOutput> IOutput for Output<T> {
     }
 }
 
-pub fn sync_via_output<T: IOutput>(line: &str, output: Arc<Mutex<T>>) -> Result<()> {
+pub fn sync_via_output(line: &str, output: Arc<Mutex<dyn IOutput>>) -> Result<()> {
     if let Ok(mut output) = output.lock() {
         return output.write(Item::from(line));
     }
@@ -66,7 +66,6 @@ mod tests {
     #[test]
     fn it_works_with_multiple_threads() {
         let fake_output = Arc::new(Mutex::new(FakeOutput));
-        // let (tx,rx) = std::sync::mpsc::sync_channel(1);
 
         let mut list = vec![];
         for _ in 0..2 {

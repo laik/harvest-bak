@@ -1,5 +1,5 @@
 use common::Result;
-use event::EventHandler;
+use event::{obj::Dispatch, EventHandler};
 use serde::{Deserialize, Serialize};
 use std::convert::AsRef;
 use std::{
@@ -18,15 +18,25 @@ pub enum Event {
     Update,
 }
 
+pub trait GetPod {
+    fn get(&self) -> Option<&Pod>;
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Pod {
     // on this the uuid path is unique identifier
     pub uuid: String,
     pub offset: usize,
-    pub inode: usize,
     pub namespace: String,
     pub pod_name: String,
     pub container_name: String,
+    pub upload: bool,
+}
+
+impl GetPod for Pod {
+    fn get(&self) -> Option<&Pod> {
+        Some(self)
+    }
 }
 
 type PodList = Vec<Pod>;
@@ -47,11 +57,11 @@ pub struct Database {
     // pod key is the pod path uuid
     pods: HashMap<String, Pod>,
     // pod op registry and handle events
-    event_handler: EventHandler<Pod>,
+    event_handler: Dispatch<Pod>,
 }
 
 impl Database {
-    pub fn new(event_handler: EventHandler<Pod>) -> Self {
+    pub fn new(event_handler: Dispatch<Pod>) -> Self {
         Self {
             pods: HashMap::new(),
             event_handler,
@@ -86,21 +96,23 @@ impl Database {
         }
     }
 
-    pub fn put(&mut self, uuid: String, pod: Pod) -> Result<()> {
+    pub fn put(&mut self, pod: Pod) -> Result<()> {
         self.event_handler
-            .event(Event::Add.as_ref().to_string(), pod.clone());
-        self.pods.insert(uuid, pod);
+            .dispatch(Event::Add.as_ref().to_string(), pod.clone());
+        self.pods.insert(pod.uuid.clone(), pod);
         Ok(())
     }
 
     pub fn delete_by_namespace_pod(&mut self, namespace: String, pod: String) -> Result<()> {
-        if let Some((uuid, _)) = self
+        let uuid = self
             .pods
             .iter()
-            .find(|(_, v)| v.namespace == namespace && v.pod_name == pod)
-        {
-            return self.delete((*&uuid).to_string());
-        };
+            .find(|(_, v)| v.namespace == namespace && v.pod_name == pod);
+
+        if let Some((_uuid, _)) = uuid {
+            return self.delete(_uuid.to_owned());
+        }
+
         Ok(())
     }
 
@@ -108,7 +120,7 @@ impl Database {
         match self.pods.get(&*uuid) {
             Some(pod) => {
                 self.event_handler
-                    .event(Event::Delete.as_ref().to_string(), pod.clone());
+                    .dispatch(Event::Delete.as_ref().to_string(), pod.clone());
                 self.pods.remove(&*uuid);
             }
             _ => {}
@@ -118,7 +130,7 @@ impl Database {
 
     pub fn update(&mut self, uuid: String, pod: Pod) -> Result<()> {
         self.event_handler
-            .event(Event::Update.as_ref().to_string(), pod.clone());
+            .dispatch(Event::Update.as_ref().to_string(), pod.clone());
         self.pods.insert(uuid, pod);
         Ok(())
     }
@@ -130,7 +142,7 @@ pub fn new_sync_database(db: Database) -> Arc<Mutex<Database>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Database, Event, Pod};
+    use crate::Event;
 
     #[test]
     fn event_it_works() {

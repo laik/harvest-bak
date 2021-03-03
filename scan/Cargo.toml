@@ -19,3 +19,4 @@ path = "../db"
 crossbeam-channel = "0.5.0"
 notify = "4.0.15"
 strum = { version = "0.20", features = ["derive"] }
+walkdir = "2"
