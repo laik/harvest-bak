@@ -42,9 +42,9 @@ impl GetPod for Pod {
 type PodList = Vec<Pod>;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct PodListMarshaler(PodList);
+pub struct PodListMarshaller(PodList);
 
-impl PodListMarshaler {
+impl PodListMarshaller {
     pub fn to_json(&self) -> String {
         match serde_json::to_string(&self.0) {
             Ok(contents) => contents,
@@ -68,8 +68,8 @@ impl Database {
         }
     }
 
-    pub fn all(&self) -> PodListMarshaler {
-        PodListMarshaler(
+    pub fn all(&self) -> PodListMarshaller {
+        PodListMarshaller(
             self.pods
                 .iter()
                 .map(|(_, v)| v.clone())

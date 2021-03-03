@@ -76,7 +76,7 @@ impl AutoScanner {
         Self { namespace, dir, db }
     }
 
-    //TODO
+    // TODO
     // the path eg:
     // /var/log/pod
     //default_mysql-apollo-slave-0_49d0b6e1-9980-4f7b-b1eb-3eab3e753b48
@@ -91,22 +91,26 @@ impl AutoScanner {
     //  logfiles: [4.log,5.log]
     // }
     // /var/log/pods/default_mysql-apollo-slave-0_49d0b6e1-9980-4f7b-b1eb-3eab3e753b48/mysql/4.log
-    fn parse_path_to_pei(_namespace: String, dir: String, path: String) -> Option<PathEventInfo> {
+    fn parse_path_to_pei(namespace: String, dir: String, path: String) -> Option<PathEventInfo> {
         if !path.starts_with(&dir) || !path.ends_with(".log") {
             return None;
         }
 
         // /default_mysql-apollo-slave-0_49d0b6e1-9980-4f7b-b1eb-3eab3e753b48/mysql/4.log
-        let (_, ns_pod_uuid) = path.strip_prefix(&dir).unwrap().split_once("/").unwrap();
+        let (_, ns_pod_uuid_container_log) =
+            path.strip_prefix(&dir).unwrap().split_once("/").unwrap();
+
+        // default_mysql-apollo-slave-0_49d0b6e1-9980-4f7b-b1eb-3eab3e753b48 mysql/4.log
+        let (ns_pod_uuid, remain) = ns_pod_uuid_container_log.split_once("/").unwrap();
 
         // ["default","mysql-apollo-slave-0","49d0b6e1-9980-4f7b-b1eb-3eab3e753b48"]
         let ns_pod_list = ns_pod_uuid.split("_").collect::<Vec<&str>>();
-        if ns_pod_list.len() < 3 || _namespace != ns_pod_list[0].to_string() {
+        if ns_pod_list.len() < 3 || namespace != ns_pod_list[0].to_string() {
             return None;
         }
 
         // container: mysql
-        let (container, _) = ns_pod_uuid.split_once("/")?;
+        let container = remain.split("/").collect::<Vec<&str>>()[0];
 
         Some(PathEventInfo {
             namespace: ns_pod_list[0].to_string(),
@@ -147,7 +151,7 @@ impl AutoScanner {
     pub fn start(
         &self,
         handles: Arc<
-            Mutex<HashMap<String, Box<dyn Listener<ScannerRecvArgument> + Send + Sync + 'static>>>,
+            Mutex<HashMap<String, Box<dyn Listener<ScannerRecvArgument> + Send + 'static>>>,
         >,
     ) -> Result<()> {
         println!("🔧 harvest auto_scanner start prepare_scanner!!!");

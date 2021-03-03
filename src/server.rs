@@ -1,29 +1,27 @@
 use super::Result;
 use db::{Database, GetPod, Pod};
+use event::obj::{Dispatch, Listener};
 use file::FileReader;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    thread::JoinHandle,
-};
-
 use rocket::config::{Config, Environment};
 use rocket::State;
 use rocket::{delete, get, post, routes};
 use rocket_contrib::json::{Json, JsonValue};
+use scan::{AutoScanner, GetPathEventInfo, PathEventInfo, ScannerRecvArgument};
 use serde::{Deserialize, Serialize};
-
-use event::obj::{Dispatch, Listener};
-
-use scan::{AutoScanner, GetPathEventInfo, ScannerRecvArgument};
+use std::collections::hash_map::RandomState;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
+use std::{collections::HashMap, thread::JoinHandle};
+
 struct DBAddEvent(Arc<Mutex<Database>>);
 impl<T> Listener<T> for DBAddEvent
 where
     T: Clone + GetPod,
 {
     fn handle(&self, t: T) {
-        println!("{:?}", t.get().unwrap());
+        if let Some(pod) = t.get() {
+            println!("db add pod {:?}", pod);
+        }
     }
 }
 
@@ -33,7 +31,9 @@ where
     T: Clone + GetPod,
 {
     fn handle(&self, t: T) {
-        println!("{:?}", t.get().unwrap());
+        if let Some(pod) = t.get() {
+            println!("db delete pod {:?}", pod);
+        }
     }
 }
 
@@ -43,7 +43,9 @@ where
     T: Clone + GetPod,
 {
     fn handle(&self, t: T) {
-        println!("{:?}", t.get().unwrap());
+        if let Some(pod) = t.get() {
+            println!("db update pod {:?}", pod);
+        }
     }
 }
 
@@ -52,7 +54,9 @@ impl<T> Listener<T> for ScannerWriteEvent
 where
     T: Clone + GetPathEventInfo,
 {
-    fn handle(&self, t: T) {}
+    fn handle(&self, t: T) {
+        println!("{:?}", t.get().unwrap())
+    }
 }
 
 struct ScannerOpenEvent(Arc<Mutex<Database>>);
@@ -78,8 +82,7 @@ where
     fn handle(&self, t: T) {
         let pei = t.get().unwrap();
         if let Ok(mut db) = self.0.lock() {
-            if let Err(e) = db.delete(pei.path.to_owned())
-            {
+            if let Err(e) = db.delete(pei.path.to_owned()) {
                 eprintln!("{}", e)
             }
         }
@@ -90,61 +93,25 @@ pub struct Harvest {
     scanner: AutoScanner,
     database: Arc<Mutex<Database>>,
     file_reader: FileReader,
-    _jh: Option<JoinHandle<Result<()>>>,
+    // jh: Option<JoinHandle<Result<()>>>,
     db_handles: HashMap<String, Box<dyn Listener<Pod> + 'static>>,
-    scan_handles: Arc<
-        Mutex<
-            HashMap<
-                String,
-                Box<
-                    dyn Listener<(scan::PathEventInfo, Arc<Mutex<Database>>)>
-                        + Send
-                        + Sync
-                        + 'static,
-                >,
-            >,
-        >,
-    >,
+    scanner_handles:
+        Arc<Mutex<HashMap<String, Box<dyn Listener<ScannerRecvArgument> + Send + 'static>>>>,
 }
 
 impl Harvest {
     pub fn new(namespace: String, dir: String) -> Self {
         let db_event_handler = Dispatch::<Pod>::new();
         let database = Arc::new(Mutex::new(Database::new(db_event_handler)));
+
         let file_reader_db = database.clone();
-
-        let db_handles = HashMap::new();
-        let scan_handles = Arc::new(Mutex::new(HashMap::new()));
-
-        let scanner = AutoScanner::new(namespace, dir, database.clone());
-        // registry scanner event handle
-        let mut scanner_event_handler = Dispatch::<ScannerRecvArgument>::new();
-
-        let scanner_update_handler_db_arc = database.clone();
-        scanner_event_handler.registry(
-            scan::PathEvent::NeedClose.as_ref().to_owned(),
-            ScannerCloseEvent(scanner_update_handler_db_arc),
-        );
-
-        let scanner_needopen_handler_db_arc = database.clone();
-        scanner_event_handler.registry(
-            scan::PathEvent::NeedOpen.as_ref().to_owned(),
-            ScannerOpenEvent(scanner_needopen_handler_db_arc),
-        );
-
-        let scanner_needwrite_handler_db_arc = database.clone();
-        scanner_event_handler.registry(
-            scan::PathEvent::NeedWrite.as_ref().to_owned(),
-            ScannerWriteEvent(scanner_needwrite_handler_db_arc),
-        );
-
         Self {
-            scanner,
+            scanner: AutoScanner::new(namespace, dir, database.clone()),
             database,
             file_reader: FileReader::new(file_reader_db),
-            _jh: None,
-            db_handles,
-            scan_handles,
+            // jh: None,
+            db_handles: HashMap::new(),
+            scanner_handles: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -155,11 +122,8 @@ impl Harvest {
             .unwrap();
 
         let database = self.database.clone();
-        let scanner_clone = self.scanner.clone();
-        let self_scan_handles = self.scan_handles.clone();
-        // start auto scanner with a new thread
-        let _jh = thread::spawn(move || scanner_clone.start(self_scan_handles));
 
+        // registry db event handle
         let db_update_handle_arc_clone = self.database.clone();
         self.db_handles.insert(
             db::Event::Update.as_ref().to_owned(),
@@ -178,6 +142,39 @@ impl Harvest {
             Box::new(DBAddEvent(db_add_handle_arc_clone)),
         );
 
+        let scanner_clone = self.scanner.clone();
+        let self_scanner_handles_registry = self.scanner_handles.clone();
+
+        match self_scanner_handles_registry.lock() {
+            Ok(mut scanner_event_handler) => {
+                // registry scanner event handle
+                let scanner_need_update_handler_db_arc = database.clone();
+                scanner_event_handler.insert(
+                    scan::PathEvent::NeedClose.as_ref().to_owned(),
+                    Box::new(ScannerCloseEvent(scanner_need_update_handler_db_arc)),
+                );
+
+                let scanner_need_open_handler_db_arc = database.clone();
+                scanner_event_handler.insert(
+                    scan::PathEvent::NeedOpen.as_ref().to_owned(),
+                    Box::new(ScannerOpenEvent(scanner_need_open_handler_db_arc)),
+                );
+
+                let scanner_need_write_handler_db_arc = database.clone();
+                scanner_event_handler.insert(
+                    scan::PathEvent::NeedWrite.as_ref().to_owned(),
+                    Box::new(ScannerWriteEvent(scanner_need_write_handler_db_arc)),
+                );
+            }
+            Err(e) => {
+                panic!("registry scanner handle error: {:?}", e)
+            }
+        }
+
+        let self_scanner_handles = self.scanner_handles.clone();
+        // start auto scanner with a new thread
+        let _jh = thread::spawn(move || scanner_clone.start(self_scanner_handles));
+
         rocket::custom(cfg)
             .mount("/", routes![apply_pod, delete_pod, query_pod])
             .register(catchers![not_found])
@@ -189,31 +186,6 @@ impl Harvest {
         }
 
         Ok(())
-    }
-
-    fn scanner_event_need_close_handle(p: (scan::PathEventInfo, Arc<Mutex<Database>>)) {
-        if let Err(e) = p.1.lock().unwrap().delete(p.0.path) {
-            eprintln!("Scanner event close error: {:?}", e);
-        }
-    }
-    fn scanner_event_need_open_handle(p: (scan::PathEventInfo, Arc<Mutex<Database>>)) {
-        if let Err(e) = p.1.lock().unwrap().put(p.0.to_pod()) {
-            eprintln!("Scanner event open error: {:?}", e);
-        }
-    }
-    fn scanner_event_need_write_handle(p: (scan::PathEventInfo, Arc<Mutex<Database>>)) {
-        println!("Scanner event write {:?}", p.0)
-    }
-
-    // recv db info start collector
-    fn database_event_add_pod_handle(&self, pod: Pod) {
-        println!("Database add pod {:?}", pod)
-    }
-    fn database_event_delete_pod_handle(pod: Pod) {
-        println!("Database delete pod {:?}", pod)
-    }
-    fn database_event_update_pod_handle(pod: Pod) {
-        println!("Database update pod {:?}", pod)
     }
 }
 
