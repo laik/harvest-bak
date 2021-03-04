@@ -1,4 +1,4 @@
-use db::{Database, GetPod};
+use db::{Database, GetPod, State};
 use event::Listener;
 use file::FileReaderWriter;
 use scan::GetPathEventInfo;
@@ -36,6 +36,7 @@ where
 {
     fn handle(&self, t: T) {
         if let Some(pod) = t.get() {
+            // the event currently not impl
             println!("db delete pod {:?}", pod);
         }
     }
@@ -47,8 +48,41 @@ where
     T: Clone + GetPod,
 {
     fn handle(&self, t: T) {
-        if let Some(pod) = t.get() {
-            println!("db update pod {:?}", pod);
+        match t.get() {
+            Some(pod) => match self.1.lock() {
+                Ok(mut frw) => {
+                    if (*pod).upload {
+                        if let Err(e) = frw.open_event((&*pod.uuid).to_owned(), &*pod.output) {
+                            eprintln!("{}", e)
+                        }
+
+                        if let Ok(mut db) = self.0.lock() {
+                            let mut pod = pod.to_owned();
+                            pod.state = State::Running;
+                            if let Err(e) = db.update(pod.uuid.clone(), pod.clone()) {
+                                eprintln!("{}", e)
+                            }
+                        }
+                    } else {
+                        if let Err(e) = frw.close_event((&*pod.uuid).to_owned()) {
+                            eprintln!("{}", e)
+                        }
+
+                        if let Ok(mut db) = self.0.lock() {
+                            let mut pod = pod.to_owned();
+                            pod.state = State::Stopped;
+                            if let Err(e) = db.update(pod.uuid.clone(), pod.clone()) {
+                                eprintln!("{}", e)
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}", e)
+                }
+            },
+
+            None => {}
         }
     }
 }

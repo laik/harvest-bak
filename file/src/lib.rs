@@ -24,8 +24,8 @@ impl FileReaderWriter {
         }
     }
 
-    pub fn set_output(&mut self, _type: String, output: Arc<Mutex<dyn IOutput>>) {
-        self.outputs.insert(_type, output);
+    pub fn set_output(&mut self, output_name: String, output: Arc<Mutex<dyn IOutput>>) {
+        self.outputs.insert(output_name, output);
     }
 
     pub fn has(&self, path: &str) -> bool {
@@ -45,22 +45,23 @@ impl FileReaderWriter {
         Ok(())
     }
 
-    pub fn open_event(&mut self, path: String, output_type: &str) -> Result<()> {
+    pub fn open_event(&mut self, path: String, output: &str) -> Result<()> {
         if self.handles.contains_key(&path) {
             return Ok(());
         }
 
-        if let Some(_output) = self.outputs.get(output_type) {
-            match Self::_open(path.clone(), self.db.clone(), _output.clone()) {
-                Ok(res) => {
-                    self.handles.insert(path.clone(), res);
+        match self.outputs.get(output) {
+            Some(output) => match Self::_open(path.clone(), self.db.clone(), output.clone()) {
+                Ok(handle_result) => {
+                    self.handles.insert(path.clone(), handle_result);
                     Ok(())
                 }
                 Err(e) => Err(e),
+            },
+            None => {
+                eprintln!("not found output type: {}", output);
+                Ok(())
             }
-        } else {
-            eprintln!("not found output type: {}", output_type);
-            Ok(())
         }
     }
 

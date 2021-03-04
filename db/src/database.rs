@@ -8,6 +8,13 @@ use std::{
 };
 use strum::AsRefStr;
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum State {
+    Ready,
+    Running,
+    Stopped,
+}
+
 #[derive(AsRefStr, Debug)]
 pub enum Event {
     #[strum(serialize = "Add")]
@@ -31,6 +38,7 @@ pub struct Pod {
     pub pod_name: String,
     pub container_name: String,
     pub upload: bool,
+    pub state: State,
     pub filter: String,
     pub output: String,
 }
@@ -44,6 +52,7 @@ impl Default for Pod {
             pod_name: "".to_owned(),
             container_name: "".to_owned(),
             upload: false,
+            state: State::Running,
             filter: "".to_owned(),
             output: "".to_owned(),
         }
