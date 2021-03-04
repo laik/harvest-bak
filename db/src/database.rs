@@ -1,5 +1,5 @@
 use common::Result;
-use event::{obj::Dispatch, EventHandler};
+use event::obj::Dispatch;
 use serde::{Deserialize, Serialize};
 use std::convert::AsRef;
 use std::{
@@ -31,6 +31,23 @@ pub struct Pod {
     pub pod_name: String,
     pub container_name: String,
     pub upload: bool,
+    pub filter: String,
+    pub output: String,
+}
+
+impl Default for Pod {
+    fn default() -> Pod {
+        Pod {
+            uuid: "".to_owned(),
+            offset: 0,
+            namespace: "".to_owned(),
+            pod_name: "".to_owned(),
+            container_name: "".to_owned(),
+            upload: false,
+            filter: "".to_owned(),
+            output: "".to_owned(),
+        }
+    }
 }
 
 impl GetPod for Pod {
@@ -85,15 +102,21 @@ impl Database {
         self.pods.get_mut(&uuid).unwrap().offset += incr_size
     }
 
-    pub fn get_by_pod(&self, namespace: String, pod: String) -> Option<&Pod> {
-        match self
-            .pods
+    pub fn get_by_namespace_pod(
+        &self,
+        namespace: String,
+        pod: String,
+    ) -> Vec<Option<(String, Pod)>> {
+        self.pods
             .iter()
-            .find(|(_, v)| v.namespace == namespace && v.pod_name == pod)
-        {
-            None => None,
-            Some((_, pod)) => Some(pod),
-        }
+            .map(|(k, v)| {
+                if v.namespace == namespace && v.pod_name == pod {
+                    Some((k.clone(), v.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
     }
 
     pub fn put(&mut self, pod: Pod) -> Result<()> {
@@ -104,15 +127,26 @@ impl Database {
     }
 
     pub fn delete_by_namespace_pod(&mut self, namespace: String, pod: String) -> Result<()> {
-        let uuid = self
+        let need_deleted_list = self
             .pods
             .iter()
-            .find(|(_, v)| v.namespace == namespace && v.pod_name == pod);
+            .map(|(k, v)| {
+                if v.namespace == namespace && v.pod_name == pod {
+                    Some((k, v))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-        if let Some((_uuid, _)) = uuid {
-            return self.delete(_uuid.to_owned());
+        for item in need_deleted_list.iter() {
+            if let Some((_, pod)) = item {
+                self.event_handler
+                    .dispatch(Event::Delete.as_ref().to_string(), (**pod).clone());
+            }
         }
-
+        self.pods
+            .retain(|_, v| !(v.namespace == namespace && v.pod_name == pod));
         Ok(())
     }
 

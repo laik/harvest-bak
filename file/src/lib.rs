@@ -9,13 +9,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
-pub struct FileReader {
+pub struct FileReaderWriter {
     handles: HashMap<String, (SyncSender<()>, JoinHandle<()>)>,
     db: Arc<Mutex<Database>>,
     outputs: HashMap<String, Arc<Mutex<dyn IOutput>>>,
 }
 
-impl FileReader {
+impl FileReaderWriter {
     pub fn new(db: Arc<Mutex<Database>>) -> Self {
         Self {
             handles: HashMap::new(),
@@ -124,7 +124,7 @@ impl FileReader {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::FileReader;
+    use crate::FileReaderWriter;
     use db::{new_sync_database, Database, Pod};
     use event::obj::Dispatch;
     use output::{FakeOutput, Output};
@@ -132,7 +132,8 @@ mod tests {
     #[test]
     fn it_works() {
         let fake_output = Arc::new(Mutex::new(Output::new(FakeOutput)));
-        let mut input = FileReader::new(new_sync_database(Database::new(Dispatch::<Pod>::new())));
+        let mut input =
+            FileReaderWriter::new(new_sync_database(Database::new(Dispatch::<Pod>::new())));
 
         input.set_output("fake_output".to_owned(), fake_output);
         if let Err(e) = input.open_event("./lib.rs".to_owned(), &"fake_output") {

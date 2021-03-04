@@ -1,98 +1,21 @@
-use super::Result;
-use db::{Database, GetPod, Pod};
+use super::*;
+use db::{Database, Pod};
 use event::obj::{Dispatch, Listener};
-use file::FileReader;
+use file::FileReaderWriter;
 use rocket::config::{Config, Environment};
 use rocket::State;
-use rocket::{delete, get, post, routes};
+use rocket::{get, post, routes};
 use rocket_contrib::json::{Json, JsonValue};
-use scan::{AutoScanner, GetPathEventInfo, PathEventInfo, ScannerRecvArgument};
+use scan::{AutoScanner, ScannerRecvArgument};
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::RandomState;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::{collections::HashMap, thread::JoinHandle};
-
-struct DBAddEvent(Arc<Mutex<Database>>);
-impl<T> Listener<T> for DBAddEvent
-where
-    T: Clone + GetPod,
-{
-    fn handle(&self, t: T) {
-        if let Some(pod) = t.get() {
-            println!("db add pod {:?}", pod);
-        }
-    }
-}
-
-struct DBDeleteEvent(Arc<Mutex<Database>>);
-impl<T> Listener<T> for DBDeleteEvent
-where
-    T: Clone + GetPod,
-{
-    fn handle(&self, t: T) {
-        if let Some(pod) = t.get() {
-            println!("db delete pod {:?}", pod);
-        }
-    }
-}
-
-struct DBUpdateEvent(Arc<Mutex<Database>>);
-impl<T> Listener<T> for DBUpdateEvent
-where
-    T: Clone + GetPod,
-{
-    fn handle(&self, t: T) {
-        if let Some(pod) = t.get() {
-            println!("db update pod {:?}", pod);
-        }
-    }
-}
-
-struct ScannerWriteEvent(Arc<Mutex<Database>>);
-impl<T> Listener<T> for ScannerWriteEvent
-where
-    T: Clone + GetPathEventInfo,
-{
-    fn handle(&self, t: T) {
-        println!("{:?}", t.get().unwrap())
-    }
-}
-
-struct ScannerOpenEvent(Arc<Mutex<Database>>);
-impl<T> Listener<T> for ScannerOpenEvent
-where
-    T: Clone + GetPathEventInfo,
-{
-    fn handle(&self, t: T) {
-        let pei = t.get().unwrap();
-        if let Ok(mut db) = self.0.lock() {
-            if let Err(e) = db.put(pei.to_pod()) {
-                eprintln!("{}", e)
-            }
-        }
-    }
-}
-
-struct ScannerCloseEvent(Arc<Mutex<Database>>);
-impl<T> Listener<T> for ScannerCloseEvent
-where
-    T: Clone + GetPathEventInfo,
-{
-    fn handle(&self, t: T) {
-        let pei = t.get().unwrap();
-        if let Ok(mut db) = self.0.lock() {
-            if let Err(e) = db.delete(pei.path.to_owned()) {
-                eprintln!("{}", e)
-            }
-        }
-    }
-}
 
 pub struct Harvest {
     scanner: AutoScanner,
     database: Arc<Mutex<Database>>,
-    file_reader: FileReader,
+    file_reader_writer: Arc<Mutex<FileReaderWriter>>,
     // jh: Option<JoinHandle<Result<()>>>,
     db_handles: HashMap<String, Box<dyn Listener<Pod> + 'static>>,
     scanner_handles:
@@ -108,7 +31,7 @@ impl Harvest {
         Self {
             scanner: AutoScanner::new(namespace, dir, database.clone()),
             database,
-            file_reader: FileReader::new(file_reader_db),
+            file_reader_writer: Arc::new(Mutex::new(FileReaderWriter::new(file_reader_db))),
             // jh: None,
             db_handles: HashMap::new(),
             scanner_handles: Arc::new(Mutex::new(HashMap::new())),
@@ -125,21 +48,33 @@ impl Harvest {
 
         // registry db event handle
         let db_update_handle_arc_clone = self.database.clone();
+        let fwr_update_handle_arc_clone = self.file_reader_writer.clone();
         self.db_handles.insert(
             db::Event::Update.as_ref().to_owned(),
-            Box::new(DBUpdateEvent(db_update_handle_arc_clone)),
+            Box::new(DBUpdateEvent(
+                db_update_handle_arc_clone,
+                fwr_update_handle_arc_clone,
+            )),
         );
 
         let db_delete_handle_arc_clone = self.database.clone();
+        let fwr_delete_handle_arc_clone = self.file_reader_writer.clone();
         self.db_handles.insert(
             db::Event::Delete.as_ref().to_owned(),
-            Box::new(DBDeleteEvent(db_delete_handle_arc_clone)),
+            Box::new(DBDeleteEvent(
+                db_delete_handle_arc_clone,
+                fwr_delete_handle_arc_clone,
+            )),
         );
 
         let db_add_handle_arc_clone = self.database.clone();
+        let fwr_add_handle_arc_clone = self.file_reader_writer.clone();
         self.db_handles.insert(
             db::Event::Add.as_ref().to_owned(),
-            Box::new(DBAddEvent(db_add_handle_arc_clone)),
+            Box::new(DBAddEvent(
+                db_add_handle_arc_clone,
+                fwr_add_handle_arc_clone,
+            )),
         );
 
         let scanner_clone = self.scanner.clone();
@@ -149,21 +84,33 @@ impl Harvest {
             Ok(mut scanner_event_handler) => {
                 // registry scanner event handle
                 let scanner_need_update_handler_db_arc = database.clone();
+                let scanner_need_update_handler_frw_arc = self.file_reader_writer.clone();
                 scanner_event_handler.insert(
                     scan::PathEvent::NeedClose.as_ref().to_owned(),
-                    Box::new(ScannerCloseEvent(scanner_need_update_handler_db_arc)),
+                    Box::new(ScannerCloseEvent(
+                        scanner_need_update_handler_db_arc,
+                        scanner_need_update_handler_frw_arc,
+                    )),
                 );
 
                 let scanner_need_open_handler_db_arc = database.clone();
+                let scanner_need_open_handler_frw_arc = self.file_reader_writer.clone();
                 scanner_event_handler.insert(
                     scan::PathEvent::NeedOpen.as_ref().to_owned(),
-                    Box::new(ScannerOpenEvent(scanner_need_open_handler_db_arc)),
+                    Box::new(ScannerOpenEvent(
+                        scanner_need_open_handler_db_arc,
+                        scanner_need_open_handler_frw_arc,
+                    )),
                 );
 
                 let scanner_need_write_handler_db_arc = database.clone();
+                let scanner_need_write_handler_frw_arc = self.file_reader_writer.clone();
                 scanner_event_handler.insert(
                     scan::PathEvent::NeedWrite.as_ref().to_owned(),
-                    Box::new(ScannerWriteEvent(scanner_need_write_handler_db_arc)),
+                    Box::new(ScannerWriteEvent(
+                        scanner_need_write_handler_db_arc,
+                        scanner_need_write_handler_frw_arc,
+                    )),
                 );
             }
             Err(e) => {
@@ -176,7 +123,7 @@ impl Harvest {
         let _jh = thread::spawn(move || scanner_clone.start(self_scanner_handles));
 
         rocket::custom(cfg)
-            .mount("/", routes![apply_pod, delete_pod, query_pod])
+            .mount("/", routes![post_pod, query_pod])
             .register(catchers![not_found])
             .manage(database)
             .launch();
@@ -193,11 +140,14 @@ impl Harvest {
 struct Request {
     namespace: String,
     pod: String,
-    container: String,
+    filter: String,
+    output: String,
+    upload: bool,
 }
 
+// /pod/collect list ns.pod start collect to output
 #[post("/pod", format = "json", data = "<req>")]
-fn apply_pod(req: Json<Request>, db: State<'_, Arc<Mutex<Database>>>) -> JsonValue {
+fn post_pod(req: Json<Request>, db: State<'_, Arc<Mutex<Database>>>) -> JsonValue {
     if req.0.namespace == "" || req.0.pod == "" {
         return json!({
             "status": "error",
@@ -207,15 +157,20 @@ fn apply_pod(req: Json<Request>, db: State<'_, Arc<Mutex<Database>>>) -> JsonVal
 
     match db.lock() {
         Ok(mut db) => {
-            if let Err(e) = db.put(Pod {
-                uuid: "".to_string(),
-                offset: 0,
-                upload: true,
-                namespace: req.0.namespace,
-                pod_name: req.0.pod,
-                container_name: req.0.container,
-            }) {
-                return json!({"status":"error","reason":format!("{}",e)});
+            for item in db.get_by_namespace_pod(req.0.namespace, req.0.pod).iter() {
+                if let Some((uuid, pod)) = item {
+                    let mut pod = pod.to_owned();
+                    pod.upload = req.0.upload;
+                    pod.filter = req.0.filter.clone();
+                    pod.output = req.0.output.clone();
+                    match db.update(uuid.to_owned(), pod) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("{}", e);
+                            return json!({"status":"error","reason":format!("{}",e)});
+                        }
+                    }
+                }
             }
             json!({"status":"ok"})
         }
@@ -224,21 +179,6 @@ fn apply_pod(req: Json<Request>, db: State<'_, Arc<Mutex<Database>>>) -> JsonVal
             "status":"error",
             "reason":format!("DB Lock Failure error {}",e)
             })
-        }
-    }
-}
-
-#[delete("/pod", format = "json", data = "<req>")]
-fn delete_pod(req: Json<Request>, db: State<'_, Arc<Mutex<Database>>>) -> JsonValue {
-    match db.lock() {
-        Ok(mut _db) => {
-            if let Err(e) = _db.delete_by_namespace_pod(req.0.namespace, req.0.pod) {
-                return json!({"status":"error","reason":format!("{:?}",e)});
-            }
-            json!({"status":"ok","reason":"none"})
-        }
-        Err(e) => {
-            json!({"status":"error","reason":format!("{}",e)})
         }
     }
 }

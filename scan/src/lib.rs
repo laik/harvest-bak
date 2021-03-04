@@ -1,4 +1,4 @@
-#![feature(str_split_once)]
+// #![feature(str_split_once)]
 
 use common::Result;
 use db::{Database, Pod};
@@ -44,11 +44,10 @@ impl PathEventInfo {
     pub fn to_pod(&self) -> Pod {
         Pod {
             uuid: self.path.clone(),
-            offset: 0,
             namespace: self.namespace.clone(),
             pod_name: self.pod.clone(),
             container_name: self.container.clone(),
-            upload: false,
+            ..Default::default()
         }
     }
 }
