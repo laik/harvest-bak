@@ -1,25 +1,25 @@
 use common::Result;
 use db::Database;
-use output::{sync_via_output, IOutput};
+use output::{sync_via_output, via_output, FakeOutput, IOutput, Output};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::mpsc::{sync_channel, SyncSender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
 
 pub struct FileReaderWriter {
     handles: HashMap<String, (SyncSender<()>, JoinHandle<()>)>,
-    db: Arc<Mutex<Database>>,
+    database: Arc<RwLock<Database>>,
     outputs: HashMap<String, Arc<Mutex<dyn IOutput>>>,
 }
 
 impl FileReaderWriter {
-    pub fn new(db: Arc<Mutex<Database>>) -> Self {
+    pub fn new(database: Arc<RwLock<Database>>) -> Self {
         Self {
             handles: HashMap::new(),
-            db,
+            database,
             outputs: HashMap::new(),
         }
     }
@@ -45,99 +45,77 @@ impl FileReaderWriter {
         Ok(())
     }
 
-    pub fn open_event(&mut self, path: String, output: &str) -> Result<()> {
+    pub fn open_event(&mut self, path: String, offset: i64, output: String) -> Result<()> {
         if self.handles.contains_key(&path) {
             return Ok(());
         }
 
-        match self.outputs.get(output) {
-            Some(output) => match Self::_open(path.clone(), self.db.clone(), output.clone()) {
-                Ok(handle_result) => {
-                    self.handles.insert(path.clone(), handle_result);
-                    Ok(())
+        let tpath = path.clone();
+        let database = self.database.clone();
+
+        let (tx, rx) = sync_channel(1);
+        let jh = thread::spawn(move || {
+            if let Ok(mut file) = File::open(tpath.clone()) {
+                if let Err(e) = file.seek(SeekFrom::Current(offset)) {
+                    eprintln!("{}", e);
+                    return;
                 }
-                Err(e) => Err(e),
-            },
-            None => {
-                eprintln!("not found output type: {}", output);
-                Ok(())
+                let mut br = BufReader::new(file);
+                let mut bf = String::new();
+                for _ in rx.recv() {
+                    match br.read_line(&mut bf) {
+                        Ok(offset) => {
+                            let output = &mut Output::new(FakeOutput);
+                            if let Err(e) = via_output(bf.as_str(), output) {
+                                eprintln!("{}", e);
+                            }
+                            database
+                                .try_write()
+                                .unwrap()
+                                .incr_offset_by_uuid(tpath.clone(), offset as i64);
+                        }
+                        Err(e) => eprintln!("{}", e),
+                    }
+                    bf.clear();
+                }
             }
-        }
+        });
+        self.handles.insert(path.clone(), (tx, jh));
+
+        Ok(())
     }
 
     pub fn write_event(&mut self, path: String) -> Result<()> {
         if !self.handles.contains_key(&path) {
             return Ok(());
         }
-        match self.handles.get(&path).unwrap().0.send(()) {
+
+        let handle = match self.handles.get(&path) {
+            Some(it) => it,
+            _ => return Ok(()),
+        };
+
+        match handle.0.send(()) {
             Ok(_) => Ok(()),
             Err(e) => Err(Box::new(e)),
         }
-    }
-
-    fn _open(
-        path: String,
-        db: Arc<Mutex<Database>>,
-        output: Arc<Mutex<dyn IOutput>>,
-    ) -> Result<(SyncSender<()>, JoinHandle<()>)> {
-        let mut offset = 0;
-
-        if let Ok(db) = db.lock() {
-            if let Some(pod) = db.get(path.clone()) {
-                offset = pod.offset;
-            }
-        }
-
-        let (tx, rx) = sync_channel(1);
-        let join_handle = thread::spawn(move || match File::open(path.clone()) {
-            Ok(mut f) => {
-                if let Err(e) = f.seek(SeekFrom::Current(offset as i64)) {
-                    eprintln!("{}", e);
-                    return;
-                }
-                let mut buf_r = BufReader::new(f);
-                let mut buf = String::new();
-                for _ in rx.recv() {
-                    match db.lock() {
-                        Ok(mut _db) => {
-                            _db.incr_offset_by_uuid(
-                                path.clone(),
-                                buf_r.read_line(&mut buf).unwrap(),
-                            );
-
-                            if let Err(e) = sync_via_output(buf.as_str(), output.clone()) {
-                                eprintln!("{}", e);
-                            }
-                        }
-                        Err(e) => eprintln!("{}", e),
-                    }
-                    buf.clear();
-                }
-            }
-            Err(e) => eprintln!("{}", e),
-        });
-
-        Ok((tx, join_handle))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use crate::FileReaderWriter;
-    use db::{new_sync_database, Database, Pod};
-    use event::obj::Dispatch;
+    use db::{new_arc_database, Database};
     use output::{FakeOutput, Output};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn it_works() {
         let fake_output = Arc::new(Mutex::new(Output::new(FakeOutput)));
-        let mut input =
-            FileReaderWriter::new(new_sync_database(Database::new(Dispatch::<Pod>::new())));
+        let mut input = FileReaderWriter::new(new_arc_database(Database::default()));
 
         input.set_output("fake_output".to_owned(), fake_output);
-        if let Err(e) = input.open_event("./lib.rs".to_owned(), &"fake_output") {
+        if let Err(e) = input.open_event("./lib.rs".to_owned(), 0, "fake_output".to_owned()) {
             assert_eq!(format!("{}", e), "No such file or directory (os error 2)");
         }
     }

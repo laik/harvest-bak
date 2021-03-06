@@ -1,12 +1,10 @@
-// #![feature(str_split_once)]
-
 use common::Result;
 use db::{Database, Pod};
-use event::obj::Listener;
+use event::{obj::Listener, Dispatch};
 use notify::{watcher, DebouncedEvent, RecursiveMode, Watcher};
+use std::sync::RwLock;
 use std::{
-    collections::HashMap,
-    sync::{mpsc::channel, Arc, Mutex},
+    sync::{mpsc::channel, Arc},
     time::Duration,
 };
 use strum::AsRefStr;
@@ -26,6 +24,10 @@ pub trait GetPathEventInfo {
     fn get(&self) -> Option<&PathEventInfo>;
 }
 
+pub trait GetDebug {
+    fn get_debug(&self) -> String;
+}
+
 #[derive(Debug, Clone)]
 pub struct PathEventInfo {
     pub(crate) namespace: String,
@@ -37,6 +39,12 @@ pub struct PathEventInfo {
 impl GetPathEventInfo for PathEventInfo {
     fn get(&self) -> Option<&PathEventInfo> {
         Some(self)
+    }
+}
+
+impl GetDebug for PathEventInfo {
+    fn get_debug(&self) -> String {
+        format!("{:?}", self).to_owned()
     }
 }
 
@@ -55,7 +63,7 @@ impl PathEventInfo {
 unsafe impl Sync for PathEventInfo {}
 unsafe impl Send for PathEventInfo {}
 
-pub type ScannerRecvArgument = (PathEventInfo, Arc<Mutex<Database>>);
+pub type ScannerRecvArgument = (PathEventInfo, Arc<RwLock<Database>>);
 
 impl GetPathEventInfo for ScannerRecvArgument {
     fn get(&self) -> Option<&PathEventInfo> {
@@ -63,16 +71,43 @@ impl GetPathEventInfo for ScannerRecvArgument {
     }
 }
 
-#[derive(Clone)]
 pub struct AutoScanner {
     namespace: String,
     dir: String,
-    db: Arc<Mutex<Database>>,
+    event_dispatch: Dispatch<PathEventInfo>,
 }
 
 impl AutoScanner {
-    pub fn new(namespace: String, dir: String, db: Arc<Mutex<Database>>) -> Self {
-        Self { namespace, dir, db }
+    pub fn new(namespace: String, dir: String) -> Self {
+        Self {
+            namespace,
+            dir,
+            event_dispatch: Dispatch::<PathEventInfo>::new(),
+        }
+    }
+
+    pub fn append_close_event_handle<L>(&mut self, l: L)
+    where
+        L: Listener<PathEventInfo> + Send + Sync + 'static,
+    {
+        self.event_dispatch
+            .registry(PathEvent::NeedClose.as_ref().to_owned(), l)
+    }
+
+    pub fn append_write_event_handle<L>(&mut self, l: L)
+    where
+        L: Listener<PathEventInfo> + Send + Sync + 'static,
+    {
+        self.event_dispatch
+            .registry(PathEvent::NeedWrite.as_ref().to_owned(), l)
+    }
+
+    pub fn append_open_event_handle<L>(&mut self, l: L)
+    where
+        L: Listener<PathEventInfo> + Send + Sync + 'static,
+    {
+        self.event_dispatch
+            .registry(PathEvent::NeedOpen.as_ref().to_owned(), l)
     }
 
     // TODO
@@ -119,44 +154,26 @@ impl AutoScanner {
         })
     }
 
-    fn prepare_scanner(&self) -> Result<()> {
+    pub fn prepare_scan(&self) -> Result<Vec<PathEventInfo>> {
+        println!("🔧 harvest auto_scanner start prepare_scanner!!!");
+        let mut result = vec![];
         for entry in WalkDir::new(self.dir.clone()) {
             let entry = entry?;
             if !entry.path().is_file() {
                 continue;
             }
-            let pei = Self::parse_path_to_pei(
+            if let Some(pei) = Self::parse_path_to_pei(
                 self.namespace.clone(),
                 self.dir.clone(),
                 entry.path().to_str().unwrap().to_owned(),
-            )
-            .unwrap();
-
-            match self.db.lock() {
-                Ok(mut _db) => {
-                    _db.put(pei.to_pod())?;
-                }
-                Err(e) => {
-                    eprintln!("auto_scanner start prepare_scanner error: {}", e);
-                    continue;
-                }
+            ) {
+                result.push(pei);
             }
-
-            continue;
         }
-        Ok(())
+        Ok(result)
     }
 
-    pub fn start(
-        &self,
-        handles: Arc<
-            Mutex<HashMap<String, Box<dyn Listener<ScannerRecvArgument> + Send + 'static>>>,
-        >,
-    ) -> Result<()> {
-        println!("🔧 harvest auto_scanner start prepare_scanner!!!");
-        // 首先list符合namespace的目录，然后watch目录的变更
-        self.prepare_scanner()?;
-
+    pub fn watch_start(&mut self) -> Result<()> {
         println!("🔧 harvest auto_scanner start");
         // Create a channel to receive the events.
         let (tx, rx) = channel();
@@ -170,8 +187,6 @@ impl AutoScanner {
         if let Err(e) = watcher.watch(&self.dir, RecursiveMode::Recursive) {
             return Err(Box::new(e));
         }
-        let handles_arc_clone = handles.clone();
-        let handles_lock = handles_arc_clone.lock().unwrap();
         loop {
             match rx.recv() {
                 Ok(event) => match event {
@@ -182,12 +197,9 @@ impl AutoScanner {
                                 self.dir.clone(),
                                 path_str.to_owned(),
                             ) {
-                                Some(pei) => {
-                                    if let Some(o) = handles_lock.get(PathEvent::NeedOpen.as_ref())
-                                    {
-                                        o.handle((pei, self.db.clone()))
-                                    }
-                                }
+                                Some(pei) => self
+                                    .event_dispatch
+                                    .dispatch(PathEvent::NeedOpen.as_ref().to_string(), pei),
                                 _ => {}
                             }
                         }
@@ -199,12 +211,10 @@ impl AutoScanner {
                                 self.dir.clone(),
                                 path_str.to_owned(),
                             ) {
-                                Some(pei) => {
-                                    if let Some(o) = handles_lock.get(PathEvent::NeedWrite.as_ref())
-                                    {
-                                        o.handle((pei, self.db.clone()))
-                                    }
-                                }
+                                Some(pei) => self
+                                    .event_dispatch
+                                    .dispatch(PathEvent::NeedWrite.as_ref().to_string(), pei),
+
                                 _ => {}
                             }
                         }
@@ -216,12 +226,9 @@ impl AutoScanner {
                                 self.dir.clone(),
                                 path_str.to_owned(),
                             ) {
-                                Some(pei) => {
-                                    if let Some(o) = handles_lock.get(PathEvent::NeedClose.as_ref())
-                                    {
-                                        o.handle((pei, self.db.clone()))
-                                    }
-                                }
+                                Some(pei) => self
+                                    .event_dispatch
+                                    .dispatch(PathEvent::NeedClose.as_ref().to_string(), pei),
                                 _ => {}
                             }
                         }
@@ -244,41 +251,28 @@ impl AutoScanner {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        sync::{Arc, Mutex},
-    };
-
-    use crate::{AutoScanner, PathEvent, PathEventInfo};
-    use db::Database;
-    use event::obj::{Dispatch, Listener};
+    use crate::{AutoScanner, GetDebug, PathEvent};
+    use event::obj::Listener;
+    use std::sync::mpsc::sync_channel as chan;
 
     #[test]
     fn it_works() {
-        trait Handle: Sync + Send {
-            fn handle(&self, pei: PathEventInfo, db: Arc<Mutex<Database>>) {
-                println!("mock handle pei {:?}", pei);
-            }
-        }
-        let maps = Arc::new(HashMap::<String, Arc<dyn Handle>>::new());
-
-        let datanase = Arc::new(Mutex::new(Database::new(Dispatch::new())));
-        let auto_scanner = AutoScanner::new("default".to_owned(), "".to_owned(), datanase.clone());
-
-        // new a event_handler registry mock action events handle
-        let mut path_event_handler = Dispatch::<(PathEventInfo, Arc<Mutex<Database>>)>::new();
+        let (tx, rx) = chan::<String>(1);
+        let mut auto_scanner = AutoScanner::new("".to_owned(), ".".to_owned());
 
         struct ListenerImpl;
         impl<T> Listener<T> for ListenerImpl
         where
-            T: Clone,
+            T: Clone + GetDebug,
         {
             fn handle(&self, t: T) {
-                // println!("{:?}", t);
+                let x = t.get_debug();
             }
         }
 
-        path_event_handler.registry(PathEvent::NeedClose.as_ref().to_owned(), ListenerImpl);
+        auto_scanner.append_close_event_handle(ListenerImpl);
+
+        // if let Err(e) = auto_scanner.watch_start() {}
     }
 
     #[test]

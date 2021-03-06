@@ -1,11 +1,34 @@
+// use dyn_clone::{clone_trait_object, DynClone};
 use std::collections::HashMap;
-pub trait Listener<T: Clone> {
+
+pub trait Listener<T>
+where
+    T: Clone,
+{
     fn handle(&self, t: T);
 }
 
+pub type BoxListener<T> = Box<dyn Listener<T> + Send + Sync>;
+
+pub type VecBoxListener<T> = Vec<BoxListener<T>>;
+
 pub struct Dispatch<T: Clone> {
-    listeners: HashMap<String, Vec<Box<dyn Listener<T> + Send + Sync>>>,
+    listeners: HashMap<String, VecBoxListener<T>>,
 }
+
+// impl<T> Clone for Dispatch<T>
+// where
+//     T: Clone,
+// {
+//     fn clone(&self) -> Self {
+//         let listeners = &self.listeners;
+//         Dispatch { listeners }
+//     }
+
+//     fn clone_from(&mut self, source: &Self) {
+//         *self = source.clone()
+//     }
+// }
 
 impl<T: Clone> Dispatch<T> {
     pub fn new() -> Self {
