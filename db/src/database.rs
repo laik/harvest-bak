@@ -74,7 +74,7 @@ impl Default for Pod {
             namespace: "".to_owned(),
             pod_name: "".to_owned(),
             container_name: "".to_owned(),
-            upload: false,
+            upload: true,
             state: State::Running,
             filter: "".to_owned(),
             output: "".to_owned(),
@@ -180,10 +180,9 @@ impl Database {
     }
 
     pub fn put(&mut self, pod: Pod) {
-        if let Some(mut _pod) = self.pods.insert(pod.uuid.clone(), pod) {
-            self.event_dispatch
-                .dispatch(Event::Add.as_ref().to_string(), _pod.clone());
-        }
+        self.pods.insert(pod.uuid.clone(), pod.clone());
+        self.event_dispatch
+            .dispatch(Event::Add.as_ref().to_string(), pod.clone());
     }
 
     pub fn delete_by_ns_pod(&mut self, ns: String, pod: String) {
@@ -209,17 +208,21 @@ impl Database {
     }
 
     pub fn delete(&mut self, uuid: String) {
-        if let Some(pod) = self.pods.remove(&*uuid) {
-            self.event_dispatch
-                .dispatch(Event::Delete.as_ref().to_string(), pod);
+        match self.pods.find(&uuid) {
+            Some(v) => {
+                self.pods.remove(&*uuid);
+                let pod = v.get();
+                self.event_dispatch
+                    .dispatch(Event::Delete.as_ref().to_string(), pod.clone());
+            }
+            _ => {}
         }
     }
 
     pub fn update(&mut self, uuid: String, v: Pod) {
-        if let Some(_pod) = self.pods.insert(uuid, v) {
-            self.event_dispatch
-                .dispatch(Event::Delete.as_ref().to_string(), _pod)
-        }
+        self.pods.insert(uuid, v.clone());
+        self.event_dispatch
+            .dispatch(Event::Delete.as_ref().to_string(), v);
     }
 }
 

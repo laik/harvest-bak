@@ -45,7 +45,7 @@ pub struct FakeOutput;
 
 impl IOutput for FakeOutput {
     fn write(&mut self, item: Item) -> Result<()> {
-        println!("{}", item.string());
+        println!("FakeOutput content: {:?}", item.string());
         Ok(())
     }
 }

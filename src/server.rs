@@ -1,13 +1,12 @@
 use super::*;
-use db::{Database, Pod};
-use event::obj::{Dispatch, Listener};
+use db::Database;
 use file::FileReaderWriter;
 use output::FakeOutput;
 use rocket::config::{Config, Environment};
 use rocket::State;
 use rocket::{get, post, routes};
 use rocket_contrib::json::{Json, JsonValue};
-use scan::{AutoScanner, ScannerRecvArgument};
+use scan::AutoScanner;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -152,7 +151,7 @@ fn post_pod(req: Json<Request>, db: State<'_, Arc<RwLock<Database>>>) -> JsonVal
 fn query_pod(db: State<'_, Arc<RwLock<Database>>>) -> JsonValue {
     match db.read() {
         Ok(_db) => {
-            json!({"status":"ok","wreason":format!("{:?}",_db.all().to_json())})
+            json!({"status":"ok","reason":format!("{:?}",_db.all().to_json())})
         }
         Err(e) => {
             json!({"status":"error","reason":format!("{}",e)})

@@ -24,8 +24,15 @@ where
 {
     fn handle(&self, t: T) {
         if let Some(pod) = t.get() {
-            // the event currently not impl
-            println!("db add pod {:?}", pod);
+            let mut frw = match self.1.lock() {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return;
+                }
+            };
+
+            frw.open_event((*pod).uuid.clone(), (*pod).offset, pod.output.clone());
         }
     }
 }
@@ -53,13 +60,11 @@ where
             Some(pod) => match self.1.lock() {
                 Ok(mut frw) => {
                     if (*pod).upload {
-                        if let Err(e) = frw.open_event(
+                        frw.open_event(
                             (&*pod.uuid).to_owned(),
                             (*pod).offset,
                             (&*pod.output).to_string(),
-                        ) {
-                            eprintln!("{}", e)
-                        }
+                        );
 
                         if let Ok(mut db) = self.0.write() {
                             let mut pod = pod.to_owned();
@@ -99,16 +104,12 @@ where
             _ => return,
         };
 
-        let mut frw = match self.1.lock() {
-            Ok(o) => o,
+        match self.1.lock() {
+            Ok(mut o) => o.write_event((*pei).path.clone()),
             Err(e) => {
                 eprintln!("{}", e);
                 return;
             }
-        };
-
-        if let Err(e) = frw.write_event((*pei).path.clone()) {
-            eprintln!("{}", e);
         }
     }
 }
@@ -124,24 +125,11 @@ where
             _ => return,
         };
 
-        let mut frw = match self.1.lock() {
-            Ok(o) => o,
+        match self.0.write() {
+            Ok(mut o) => o.put(pei.to_pod()),
             Err(e) => {
                 eprintln!("{}", e);
                 return;
-            }
-        };
-
-        let db = match self.0.read() {
-            Ok(o) => o,
-            Err(e) => {
-                eprintln!("{}", e);
-                return;
-            }
-        };
-        if let Some(pod) = db.get(pei.path.clone()) {
-            if let Err(e) = frw.open_event((*pei).path.clone(), (*pod).offset, pod.output.clone()) {
-                eprintln!("{}", e);
             }
         }
     }

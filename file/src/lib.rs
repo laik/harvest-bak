@@ -1,6 +1,6 @@
 use common::Result;
 use db::Database;
-use output::{sync_via_output, via_output, FakeOutput, IOutput, Output};
+use output::{via_output, FakeOutput, IOutput, Output};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -45,59 +45,62 @@ impl FileReaderWriter {
         Ok(())
     }
 
-    pub fn open_event(&mut self, path: String, offset: i64, output: String) -> Result<()> {
+    pub fn open_event(&mut self, path: String, offset: i64, output: String) {
         if self.handles.contains_key(&path) {
-            return Ok(());
+            return;
         }
-
-        let tpath = path.clone();
+        let thread_path = path.clone();
         let database = self.database.clone();
 
         let (tx, rx) = sync_channel(1);
         let jh = thread::spawn(move || {
-            if let Ok(mut file) = File::open(tpath.clone()) {
+            if let Ok(mut file) = File::open(thread_path.clone()) {
                 if let Err(e) = file.seek(SeekFrom::Current(offset)) {
-                    eprintln!("{}", e);
+                    eprintln!("open event seek failed, error: {:?}", e);
                     return;
                 }
                 let mut br = BufReader::new(file);
                 let mut bf = String::new();
-                for _ in rx.recv() {
-                    match br.read_line(&mut bf) {
-                        Ok(offset) => {
-                            let output = &mut Output::new(FakeOutput);
-                            if let Err(e) = via_output(bf.as_str(), output) {
-                                eprintln!("{}", e);
-                            }
-                            database
-                                .try_write()
-                                .unwrap()
-                                .incr_offset_by_uuid(tpath.clone(), offset as i64);
+                let output = &mut Output::new(FakeOutput);
+
+                loop {
+                    for _ in rx.recv() {
+                        let offset = br.read_line(&mut bf).unwrap();
+
+                        if let Err(e) = via_output(bf.as_str(), output) {
+                            eprintln!("{}", e);
                         }
-                        Err(e) => eprintln!("{}", e),
+                        if let Ok(mut database) = database.try_write() {
+                            database.incr_offset_by_uuid(thread_path.clone(), offset as i64);
+                        } else {
+                            break;
+                        }
+
+                        bf.clear();
                     }
-                    bf.clear();
                 }
             }
         });
         self.handles.insert(path.clone(), (tx, jh));
-
-        Ok(())
     }
 
-    pub fn write_event(&mut self, path: String) -> Result<()> {
+    pub fn write_event(&mut self, path: String) {
         if !self.handles.contains_key(&path) {
-            return Ok(());
+            return;
         }
 
         let handle = match self.handles.get(&path) {
             Some(it) => it,
-            _ => return Ok(()),
+            _ => return,
         };
 
         match handle.0.send(()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Box::new(e)),
+            Ok(_) => return,
+            Err(e) => eprintln!(
+                "FileReaderWriter send write event error: {:?},path: {:?}",
+                e,
+                path.clone()
+            ),
         }
     }
 }
@@ -115,8 +118,6 @@ mod tests {
         let mut input = FileReaderWriter::new(new_arc_database(Database::default()));
 
         input.set_output("fake_output".to_owned(), fake_output);
-        if let Err(e) = input.open_event("./lib.rs".to_owned(), 0, "fake_output".to_owned()) {
-            assert_eq!(format!("{}", e), "No such file or directory (os error 2)");
-        }
+        input.open_event("./lib.rs".to_owned(), 0, "fake_output".to_owned());
     }
 }
