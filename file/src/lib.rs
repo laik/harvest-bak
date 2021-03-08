@@ -1,4 +1,4 @@
-use common::Result;
+#![feature(seek_stream_len)]
 use db::Database;
 use output::{via_output, FakeOutput, IOutput, Output};
 use std::collections::HashMap;
@@ -9,8 +9,13 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
 
+pub enum SendFileEvent {
+    Close,
+    Other,
+}
+
 pub struct FileReaderWriter {
-    handles: HashMap<String, (SyncSender<()>, JoinHandle<()>)>,
+    handles: HashMap<String, (SyncSender<SendFileEvent>, JoinHandle<()>)>,
     database: Arc<RwLock<Database>>,
     outputs: HashMap<String, Arc<Mutex<dyn IOutput>>>,
 }
@@ -35,14 +40,18 @@ impl FileReaderWriter {
         false
     }
 
-    pub fn close_event(&mut self, path: String) -> Result<()> {
-        match self.handles.get(&path) {
-            Some(_item) => {
-                self.handles.remove(&path);
+    pub fn close_event(&mut self, path: String) {
+        if let Some((tx, jh)) = self.handles.get(&path) {
+            if let Err(e) = tx.send(SendFileEvent::Close) {
+                eprintln!(
+                    "send close event to path FileReaderWriter {:?} error: {:?}",
+                    &path, e
+                );
+                let mut _jh = &*jh;
+                // _jh.join();
             }
-            None => {}
-        }
-        Ok(())
+            self.handles.remove(&path);
+        };
     }
 
     pub fn open_event(&mut self, path: String, offset: i64, output: String) {
@@ -52,9 +61,16 @@ impl FileReaderWriter {
         let thread_path = path.clone();
         let database = self.database.clone();
 
-        let (tx, rx) = sync_channel(1);
+        let (tx, rx) = sync_channel::<SendFileEvent>(1);
+        let mut offset = offset;
         let jh = thread::spawn(move || {
             if let Ok(mut file) = File::open(thread_path.clone()) {
+                let size = file.stream_len().unwrap();
+                // println!("file {:?} length {:?}", thread_path.clone(), size);
+                // skip to current file end
+                if size as i64 > offset {
+                    offset = size as i64;
+                }
                 if let Err(e) = file.seek(SeekFrom::Current(offset)) {
                     eprintln!("open event seek failed, error: {:?}", e);
                     return;
@@ -64,7 +80,13 @@ impl FileReaderWriter {
                 let output = &mut Output::new(FakeOutput);
 
                 loop {
-                    for _ in rx.recv() {
+                    for item in rx.recv() {
+                        match item {
+                            SendFileEvent::Close => {
+                                break;
+                            }
+                            _ => {}
+                        }
                         let offset = br.read_line(&mut bf).unwrap();
 
                         if let Err(e) = via_output(bf.as_str(), output) {
@@ -94,13 +116,13 @@ impl FileReaderWriter {
             _ => return,
         };
 
-        match handle.0.send(()) {
-            Ok(_) => return,
+        match handle.0.send(SendFileEvent::Other) {
             Err(e) => eprintln!(
                 "FileReaderWriter send write event error: {:?},path: {:?}",
                 e,
                 path.clone()
             ),
+            _ => {}
         }
     }
 }

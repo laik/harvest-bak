@@ -1,4 +1,4 @@
-use db::{Database, GetPod, State};
+use db::{Database, GetPod};
 use event::Listener;
 use file::FileReaderWriter;
 use scan::GetPathEventInfo;
@@ -24,15 +24,7 @@ where
 {
     fn handle(&self, t: T) {
         if let Some(pod) = t.get() {
-            let mut frw = match self.1.lock() {
-                Ok(o) => o,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    return;
-                }
-            };
-
-            frw.open_event((*pod).uuid.clone(), (*pod).offset, pod.output.clone());
+            println!("db event add {:?}", pod);
         }
     }
 }
@@ -43,10 +35,17 @@ where
     T: Clone + GetPod,
 {
     fn handle(&self, t: T) {
-        if let Some(pod) = t.get() {
-            // the event currently not impl
-            println!("db delete pod {:?}", pod);
-        }
+        let pod = match t.get() {
+            None => return,
+            Some(it) => it.clone(),
+        };
+        match self.1.try_lock() {
+            Ok(mut o) => o.close_event(pod.uuid.clone()),
+            Err(e) => {
+                eprintln!("{}", e);
+                return;
+            }
+        };
     }
 }
 
@@ -56,39 +55,36 @@ where
     T: Clone + GetPod,
 {
     fn handle(&self, t: T) {
-        match t.get() {
-            Some(pod) => match self.1.lock() {
-                Ok(mut frw) => {
-                    if (*pod).upload {
-                        frw.open_event(
-                            (&*pod.uuid).to_owned(),
-                            (*pod).offset,
-                            (&*pod.output).to_string(),
-                        );
+        let mut pod = match t.get() {
+            Some(pod) => pod.clone(),
+            _ => return,
+        };
 
-                        if let Ok(mut db) = self.0.write() {
-                            let mut pod = pod.to_owned();
-                            pod.state = State::Running;
-                            db.update(pod.uuid.clone(), pod.clone());
-                        }
-                    } else {
-                        if let Err(e) = frw.close_event((&*pod.uuid).to_owned()) {
-                            eprintln!("{}", e)
-                        }
+        let mut frw = match self.1.lock() {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("{}", e);
+                return;
+            }
+        };
 
-                        if let Ok(mut db) = self.0.write() {
-                            let mut pod = pod.to_owned();
-                            pod.state = State::Stopped;
-                            db.update(pod.uuid.clone(), pod.clone());
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}", e)
-                }
-            },
+        match pod.upload {
+            true => {
+                frw.open_event(
+                    (&*pod.uuid).to_string(),
+                    pod.offset,
+                    (&*pod.output).to_string(),
+                );
+                pod.set_running()
+            }
+            false => {
+                frw.close_event((&*pod.uuid).to_owned());
+                pod.set_stopped()
+            }
+        };
 
-            None => {}
+        if let Ok(mut db) = self.0.write() {
+            db.update(pod.uuid.clone(), pod.clone())
         }
     }
 }
@@ -99,13 +95,17 @@ where
     T: Clone + GetPathEventInfo,
 {
     fn handle(&self, t: T) {
-        let pei = match t.get() {
-            Some(it) => it,
+        let path = match t.get() {
+            Some(it) => it.path.clone(),
             _ => return,
         };
 
+        println!("watch scanner write event, path {:?}", path);
+
         match self.1.lock() {
-            Ok(mut o) => o.write_event((*pei).path.clone()),
+            Ok(mut o) => {
+                o.write_event(path)
+            }
             Err(e) => {
                 eprintln!("{}", e);
                 return;
@@ -120,13 +120,26 @@ where
     T: Clone + GetPathEventInfo,
 {
     fn handle(&self, t: T) {
-        let pei = match t.get() {
-            Some(it) => it,
+        let pod = match t.get() {
+            Some(it) => it.to_pod(),
             _ => return,
         };
 
+        let mut frw = match self.1.lock() {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("{}", e);
+                return;
+            }
+        };
+
+        frw.open_event(pod.uuid.clone(), pod.offset, pod.output.clone());
+
         match self.0.write() {
-            Ok(mut o) => o.put(pei.to_pod()),
+            Ok(mut o) => {
+                println!("watch scanner open event add pod {:?}", pod);
+                o.put(pod)
+            }
             Err(e) => {
                 eprintln!("{}", e);
                 return;

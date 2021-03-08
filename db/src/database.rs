@@ -2,6 +2,7 @@ use crate::ConcHashMap;
 use event::obj::Dispatch;
 use event::Listener;
 use serde::{Deserialize, Serialize};
+use std::os::macos::raw::stat;
 use std::{
     hash::Hash,
     sync::{Arc, RwLock},
@@ -64,6 +65,15 @@ pub struct Pod {
     pub state: State,
     pub filter: String,
     pub output: String,
+}
+
+impl Pod {
+    pub fn set_running(&mut self) {
+        self.state = State::Running;
+    }
+    pub fn set_stopped(&mut self) {
+        self.state = State::Stopped;
+    }
 }
 
 impl Default for Pod {
@@ -208,14 +218,9 @@ impl Database {
     }
 
     pub fn delete(&mut self, uuid: String) {
-        match self.pods.find(&uuid) {
-            Some(v) => {
-                self.pods.remove(&*uuid);
-                let pod = v.get();
-                self.event_dispatch
-                    .dispatch(Event::Delete.as_ref().to_string(), pod.clone());
-            }
-            _ => {}
+        if let Some(pod) = self.pods.remove(&*uuid) {
+            self.event_dispatch
+                .dispatch(Event::Delete.as_ref().to_string(), pod);
         }
     }
 
