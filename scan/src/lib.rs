@@ -195,6 +195,7 @@ impl AutoScanner {
         // below will be monitored for changes.
         watcher.watch(&self.dir, RecursiveMode::Recursive)?;
 
+        let cw = notify::Op::CREATE | notify::Op::WRITE;
         loop {
             match rx.recv() {
                 Ok(RawEvent {
@@ -202,10 +203,8 @@ impl AutoScanner {
                     op: Ok(op),
                     cookie,
                 }) => {
-                    println!("{:?} {:?} ({:?})", op, path, cookie);
                     let path = path.to_str().unwrap().to_string();
 
-                    let CREATEANDWRITE = notify::Op::CREATE | notify::Op::WRITE;
                     match op {
                         notify::Op::CREATE => {
                             match Self::parse_path_to_pei(
@@ -227,25 +226,6 @@ impl AutoScanner {
                                 _ => {}
                             }
                         }
-                        CREATEANDWRITE => {
-                            match Self::parse_path_to_pei(
-                                self.namespace.to_owned(),
-                                self.dir.clone(),
-                                path.clone(),
-                            ) {
-                                Some(pei) => self.dispatch_open_event(pei),
-                                _ => {}
-                            }
-
-                            match Self::parse_path_to_pei(
-                                self.namespace.to_owned(),
-                                self.dir.clone(),
-                                path.clone(),
-                            ) {
-                                Some(pei) => self.dispatch_write_event(pei),
-                                _ => {}
-                            }
-                        }
                         notify::Op::REMOVE => {
                             match Self::parse_path_to_pei(
                                 self.namespace.to_owned(),
@@ -256,7 +236,22 @@ impl AutoScanner {
                                 _ => {}
                             }
                         }
-                        _ => {}
+                        // cw => {
+                        //     match Self::parse_path_to_pei(
+                        //         self.namespace.to_owned(),
+                        //         self.dir.clone(),
+                        //         path.clone(),
+                        //     ) {
+                        //         Some(pei) => {
+                        //             self.dispatch_open_event(pei.clone());
+                        //             self.dispatch_write_event(pei)
+                        //         }
+                        //         _ => {}
+                        //     }
+                        // }
+                        _ => {
+                            println!("{:?} {:?} ({:?})", op, path, cookie);
+                        }
                     }
                 }
                 Ok(event) => println!("scannner watch path: {:?} event: {:?}", &self.dir, event),

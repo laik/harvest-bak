@@ -16,20 +16,6 @@ pub struct Dispatch<T: Clone> {
     listeners: HashMap<String, VecBoxListener<T>>,
 }
 
-// impl<T> Clone for Dispatch<T>
-// where
-//     T: Clone,
-// {
-//     fn clone(&self) -> Self {
-//         let listeners = &self.listeners;
-//         Dispatch { listeners }
-//     }
-
-//     fn clone_from(&mut self, source: &Self) {
-//         *self = source.clone()
-//     }
-// }
-
 impl<T: Clone> Dispatch<T> {
     pub fn new() -> Self {
         Self {

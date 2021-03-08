@@ -100,10 +100,9 @@ where
             _ => return,
         };
 
-        println!("watch scanner write event, path {:?}", path);
-
         match self.1.lock() {
             Ok(mut o) => {
+                println!("event_listener write path {:?}", path);
                 o.write_event(path)
             }
             Err(e) => {
@@ -137,7 +136,7 @@ where
 
         match self.0.write() {
             Ok(mut o) => {
-                println!("watch scanner open event add pod {:?}", pod);
+                println!("event_listener open {:?}", pod.uuid.clone());
                 o.put(pod)
             }
             Err(e) => {
@@ -156,6 +155,7 @@ where
     fn handle(&self, t: T) {
         let pei = t.get().unwrap();
         if let Ok(mut db) = self.0.write() {
+            println!("event_listener close {:?}", pei.path.to_owned());
             db.delete(pei.path.to_owned())
         }
     }

@@ -48,16 +48,12 @@ impl FileReaderWriter {
                     &path, e
                 );
                 let mut _jh = &*jh;
-                // _jh.join();
             }
             self.handles.remove(&path);
         };
     }
 
-    pub fn open_event(&mut self, path: String, offset: i64, output: String) {
-        if self.handles.contains_key(&path) {
-            return;
-        }
+    fn open(&mut self, path: String, offset: i64, output: String) {
         let thread_path = path.clone();
         let database = self.database.clone();
 
@@ -66,7 +62,6 @@ impl FileReaderWriter {
         let jh = thread::spawn(move || {
             if let Ok(mut file) = File::open(thread_path.clone()) {
                 let size = file.stream_len().unwrap();
-                // println!("file {:?} length {:?}", thread_path.clone(), size);
                 // skip to current file end
                 if size as i64 > offset {
                     offset = size as i64;
@@ -106,9 +101,16 @@ impl FileReaderWriter {
         self.handles.insert(path.clone(), (tx, jh));
     }
 
+    pub fn open_event(&mut self, path: String, offset: i64, output: String) {
+        if self.handles.contains_key(&path) {
+            return;
+        }
+        self.open(path, offset, output)
+    }
+
     pub fn write_event(&mut self, path: String) {
         if !self.handles.contains_key(&path) {
-            return;
+            self.open(path.clone(), 0, "".to_owned())
         }
 
         let handle = match self.handles.get(&path) {
