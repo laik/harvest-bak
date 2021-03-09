@@ -39,10 +39,10 @@ impl Outputs {
 
     pub fn output(&mut self, name: String, line: &str) {
         if !self.output_listener.contains_key(&name) {
-            warn!("outputs not found output name `{}`", name);
             if line.len() == 0 {
                 return;
             }
+            warn!("outputs not found output name `{}`", name);
             warn!("use default stdout {}", line);
             return;
         }

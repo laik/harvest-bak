@@ -1,7 +1,6 @@
 use super::*;
 use db::Database;
 use file::FileReaderWriter;
-use output::FakeOutput;
 use rocket::config::{Config, Environment};
 use rocket::State;
 use rocket::{get, post, routes};
@@ -10,10 +9,6 @@ use scan::AutoScanner;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-
-fn new_arc_mutex<T>(t: T) -> Arc<Mutex<T>> {
-    Arc::new(Mutex::new(t))
-}
 
 pub struct Harvest {
     scanner: Arc<RwLock<AutoScanner>>,

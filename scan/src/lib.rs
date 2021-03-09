@@ -236,19 +236,18 @@ impl AutoScanner {
                                 _ => {}
                             }
                         }
-                        _cw => {
-                            match Self::parse_path_to_pei(
-                                self.namespace.to_owned(),
-                                self.dir.clone(),
-                                path.clone(),
-                            ) {
-                                Some(pei) => {
-                                    self.dispatch_write_event(pei)
-                                }
-                                _ => {}
-                            }
-                        }
                         _ => {
+                            if _cw.contains(op) {
+                                match Self::parse_path_to_pei(
+                                    self.namespace.to_owned(),
+                                    self.dir.clone(),
+                                    path.clone(),
+                                ) {
+                                    Some(pei) => self.dispatch_write_event(pei),
+                                    _ => {}
+                                }
+                                continue;
+                            }
                             println!("unhandled event {:?} {:?} ({:?})", op, path, cookie);
                         }
                     }
@@ -261,75 +260,6 @@ impl AutoScanner {
             }
         }
 
-        // // Create a watcher object, delivering debounced events.
-        // // The notification back-end is selected based on the platform.
-        // let mut watcher = watcher(tx, Duration::from_millis(0))?;
-
-        // // Add a path to be watched. All files and directories at that path and
-        // // below will be monitored for changes.
-        // if let Err(e) = watcher.watch(&self.dir, RecursiveMode::Recursive) {
-        //     return Err(Box::new(e));
-        // }
-        // loop {
-        //     match rx.recv() {
-        //         Ok(event) => match event {
-        //             DebouncedEvent::Create(path) => {
-        //                 if let Some(path_str) = path.to_str() {
-        //                     match Self::parse_path_to_pei(
-        //                         self.namespace.to_owned(),
-        //                         self.dir.clone(),
-        //                         path_str.to_owned(),
-        //                     ) {
-        //                         Some(pei) => self
-        //                             .event_dispatch
-        //                             .dispatch(PathEvent::NeedOpen.as_ref().to_string(), pei),
-        //                         _ => {}
-        //                     }
-        //                 }
-        //             }
-        //             DebouncedEvent::Write(path) => {
-        //                 if let Some(path_str) = path.to_str() {
-        //                     match Self::parse_path_to_pei(
-        //                         self.namespace.to_owned(),
-        //                         self.dir.clone(),
-        //                         path_str.to_owned(),
-        //                     ) {
-        //                         Some(pei) => self
-        //                             .event_dispatch
-        //                             .dispatch(PathEvent::NeedWrite.as_ref().to_string(), pei),
-
-        //                         _ => {}
-        //                     }
-        //                 }
-        //             }
-        //             DebouncedEvent::Remove(path) => {
-        //                 if let Some(path_str) = path.to_str() {
-        //                     match Self::parse_path_to_pei(
-        //                         self.namespace.to_owned(),
-        //                         self.dir.clone(),
-        //                         path_str.to_owned(),
-        //                     ) {
-        //                         Some(pei) => self
-        //                             .event_dispatch
-        //                             .dispatch(PathEvent::NeedClose.as_ref().to_string(), pei),
-        //                         _ => {}
-        //                     }
-        //                 }
-        //             }
-        //             DebouncedEvent::Error(e, path) => {
-        //                 println!("watch event error: {:?} option: {:?}", e, path);
-        //             }
-        //             _ => {
-        //                 println!("watch event {:?} not handle", event)
-        //             }
-        //         },
-        //         Err(e) => {
-        //             println!("watch error: {:?}", e);
-        //             break;
-        //         }
-        //     }
-        // }
-
         Ok(())
     }
 }
@@ -338,11 +268,9 @@ impl AutoScanner {
 mod tests {
     use crate::{AutoScanner, GetDebug, PathEvent};
     use event::obj::Listener;
-    use std::sync::mpsc::sync_channel as chan;
 
     #[test]
     fn it_works() {
-        let (tx, rx) = chan::<String>(1);
         let mut auto_scanner = AutoScanner::new("".to_owned(), ".".to_owned());
 
         struct ListenerImpl;
@@ -351,7 +279,7 @@ mod tests {
             T: Clone + GetDebug,
         {
             fn handle(&self, t: T) {
-                let x = t.get_debug();
+                let _ = t.get_debug();
             }
         }
 

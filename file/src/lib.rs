@@ -1,7 +1,7 @@
 #![feature(seek_stream_len)]
 use db::Database;
 use log::error as err;
-use output::{via_output, FakeOutput, Output, OTS, OUTPUTS};
+use output::OTS;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
