@@ -195,7 +195,7 @@ impl AutoScanner {
         // below will be monitored for changes.
         watcher.watch(&self.dir, RecursiveMode::Recursive)?;
 
-        let cw = notify::Op::CREATE | notify::Op::WRITE;
+        let _cw = notify::Op::CREATE | notify::Op::WRITE;
         loop {
             match rx.recv() {
                 Ok(RawEvent {
@@ -236,21 +236,20 @@ impl AutoScanner {
                                 _ => {}
                             }
                         }
-                        // cw => {
-                        //     match Self::parse_path_to_pei(
-                        //         self.namespace.to_owned(),
-                        //         self.dir.clone(),
-                        //         path.clone(),
-                        //     ) {
-                        //         Some(pei) => {
-                        //             self.dispatch_open_event(pei.clone());
-                        //             self.dispatch_write_event(pei)
-                        //         }
-                        //         _ => {}
-                        //     }
-                        // }
+                        _cw => {
+                            match Self::parse_path_to_pei(
+                                self.namespace.to_owned(),
+                                self.dir.clone(),
+                                path.clone(),
+                            ) {
+                                Some(pei) => {
+                                    self.dispatch_write_event(pei)
+                                }
+                                _ => {}
+                            }
+                        }
                         _ => {
-                            println!("{:?} {:?} ({:?})", op, path, cookie);
+                            println!("unhandled event {:?} {:?} ({:?})", op, path, cookie);
                         }
                     }
                 }

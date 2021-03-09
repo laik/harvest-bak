@@ -308,6 +308,7 @@ dependencies = [
  "common",
  "db",
  "event",
+ "log 0.4.14",
  "output",
 ]
 
@@ -412,6 +413,7 @@ dependencies = [
  "event",
  "file",
  "filter",
+ "log 0.4.14",
  "output",
  "paw",
  "rocket",
@@ -718,6 +720,8 @@ name = "output"
 version = "0.1.0"
 dependencies = [
  "common",
+ "log 0.4.14",
+ "once_cell",
 ]
 
 [[package]]
@@ -1020,6 +1024,7 @@ dependencies = [
  "crossbeam-channel",
  "db",
  "event",
+ "log 0.4.14",
  "notify",
  "strum",
  "walkdir",

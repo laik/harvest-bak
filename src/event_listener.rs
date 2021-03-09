@@ -1,6 +1,7 @@
 use db::{Database, GetPod};
 use event::Listener;
 use file::FileReaderWriter;
+use log::{error as err, info, warn};
 use scan::GetPathEventInfo;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -24,7 +25,7 @@ where
 {
     fn handle(&self, t: T) {
         if let Some(pod) = t.get() {
-            println!("db event add {:?}", pod);
+            info!("db event add {:?}", pod);
         }
     }
 }
@@ -39,10 +40,10 @@ where
             None => return,
             Some(it) => it.clone(),
         };
-        match self.1.try_lock() {
+        match self.1.lock() {
             Ok(mut o) => o.close_event(pod.uuid.clone()),
             Err(e) => {
-                eprintln!("{}", e);
+                err!("DBDeleteEvent {}", e);
                 return;
             }
         };
@@ -63,7 +64,7 @@ where
         let mut frw = match self.1.lock() {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("{}", e);
+                warn!("DBUpdateEvent {}", e);
                 return;
             }
         };
@@ -102,11 +103,11 @@ where
 
         match self.1.lock() {
             Ok(mut o) => {
-                println!("event_listener write path {:?}", path);
+                info!("event_listener write path {}", path);
                 o.write_event(path)
             }
             Err(e) => {
-                eprintln!("{}", e);
+                err!("{}", e);
                 return;
             }
         }
@@ -127,7 +128,7 @@ where
         let mut frw = match self.1.lock() {
             Ok(o) => o,
             Err(e) => {
-                eprintln!("{}", e);
+                err!("{}", e);
                 return;
             }
         };
@@ -136,7 +137,7 @@ where
 
         match self.0.write() {
             Ok(mut o) => {
-                println!("event_listener open {:?}", pod.uuid.clone());
+                info!("event_listener open {}", pod.uuid.clone());
                 o.put(pod)
             }
             Err(e) => {
@@ -155,7 +156,7 @@ where
     fn handle(&self, t: T) {
         let pei = t.get().unwrap();
         if let Ok(mut db) = self.0.write() {
-            println!("event_listener close {:?}", pei.path.to_owned());
+            info!("event_listener close {}", pei.path.to_owned());
             db.delete(pei.path.to_owned())
         }
     }

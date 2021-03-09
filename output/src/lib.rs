@@ -1,5 +1,62 @@
 use common::{Item, Result};
-use std::sync::{Arc, Mutex};
+use log::{error as err, warn};
+use once_cell::sync::Lazy;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+pub use OUTPUTS as OTS;
+
+pub static OUTPUTS: Lazy<Arc<Mutex<Outputs>>> = Lazy::new(|| {
+    let outputs = Arc::new(Mutex::new(Outputs::new()));
+    if let Ok(mut ots) = outputs.lock() {
+        ots.registry_output("fake_output".to_owned(), Output::new(FakeOutput));
+    }
+    outputs
+});
+
+pub struct Outputs {
+    output_listener: HashMap<String, Box<dyn IOutput>>,
+}
+
+impl Outputs {
+    pub fn new() -> Self {
+        Self {
+            output_listener: HashMap::new(),
+        }
+    }
+
+    pub fn registry_output<T>(&mut self, name: String, t: T)
+    where
+        T: IOutput + Send + Sync + 'static,
+    {
+        if self.output_listener.contains_key(&name) {
+            return;
+        }
+        self.output_listener.insert(name, Box::new(t));
+    }
+
+    pub fn output(&mut self, name: String, line: &str) {
+        if !self.output_listener.contains_key(&name) {
+            warn!("outputs not found output name `{}`", name);
+            if line.len() == 0 {
+                return;
+            }
+            warn!("use default stdout {}", line);
+            return;
+        }
+
+        match self.output_listener.get_mut(&name) {
+            Some(o) => {
+                if let Err(e) = o.write(Item::from(line)) {
+                    err!("{:?}", e);
+                }
+            }
+            _ => {}
+        }
+    }
+}
 
 pub trait IOutput: Send + Sync + 'static {
     fn write(&mut self, item: Item) -> Result<()>;
@@ -9,7 +66,6 @@ pub trait IOutput: Send + Sync + 'static {
 pub struct Output<T: ?Sized + IOutput> {
     o: T,
 }
-
 unsafe impl<T: IOutput> Send for Output<T> {}
 unsafe impl<T: IOutput> Sync for Output<T> {}
 
@@ -33,7 +89,10 @@ pub fn sync_via_output(line: &str, output: Arc<Mutex<dyn IOutput>>) -> Result<()
     Ok(())
 }
 
-pub fn via_output<T: IOutput>(line: &str, o: &mut T) -> Result<()> {
+pub fn via_output<'a, T: IOutput>(line: &'a str, o: &'a mut T) -> Result<()> {
+    if line.len() == 0 {
+        return Ok(());
+    }
     o.write(Item::from(line))
 }
 
@@ -80,5 +139,35 @@ mod tests {
         for j in list.into_iter() {
             j.join().unwrap()
         }
+    }
+
+    #[test]
+    fn it_works_with_outputs() {
+        let mut outputs = Outputs::new();
+        outputs.registry_output("fake_output".to_owned(), Output::new(FakeOutput));
+        outputs.output("fake_output".to_owned(), "123")
+    }
+
+    #[test]
+    fn it_static_outputs() {
+        if let Ok(mut ots) = OUTPUTS.try_lock() {
+            ots.output("fake_output".to_owned(), "1")
+        }
+        let mut j = vec![];
+        let o1 = OUTPUTS.clone();
+        j.push(thread::spawn(move || {
+            if let Ok(mut ots) = o1.try_lock() {
+                ots.output("fake_output".to_owned(), "2")
+            }
+        }));
+
+        let o2 = OUTPUTS.clone();
+        j.push(thread::spawn(move || {
+            if let Ok(mut ots) = o2.try_lock() {
+                ots.output("fake_output".to_owned(), "3")
+            }
+        }));
+
+        let _ = j.into_iter().map(|_j| _j.join().unwrap());
     }
 }

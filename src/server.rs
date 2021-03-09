@@ -36,11 +36,6 @@ impl Harvest {
 
         let frw = Arc::new(Mutex::new(FileReaderWriter::new(self.database.clone())));
 
-        // register output
-        if let Ok(mut _frw) = frw.lock() {
-            _frw.set_output("fake_output".to_owned(), new_arc_mutex(FakeOutput));
-        }
-
         // registry db event handle
         match self.database.write() {
             Ok(mut rwdb) => {

@@ -32,3 +32,8 @@ paw = "1.0"
 rocket = "0.4.7"
 rocket_contrib = "0.4.7"
 serde = "1.0.123"
+log = "0.4"
+
+
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"

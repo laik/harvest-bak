@@ -1,11 +1,12 @@
 #![feature(seek_stream_len)]
 use db::Database;
-use output::{via_output, FakeOutput, IOutput, Output};
+use log::error as err;
+use output::{via_output, FakeOutput, Output, OTS, OUTPUTS};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::mpsc::{sync_channel, SyncSender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -17,7 +18,6 @@ pub enum SendFileEvent {
 pub struct FileReaderWriter {
     handles: HashMap<String, (SyncSender<SendFileEvent>, JoinHandle<()>)>,
     database: Arc<RwLock<Database>>,
-    outputs: HashMap<String, Arc<Mutex<dyn IOutput>>>,
 }
 
 impl FileReaderWriter {
@@ -25,12 +25,7 @@ impl FileReaderWriter {
         Self {
             handles: HashMap::new(),
             database,
-            outputs: HashMap::new(),
         }
-    }
-
-    pub fn set_output(&mut self, output_name: String, output: Arc<Mutex<dyn IOutput>>) {
-        self.outputs.insert(output_name, output);
     }
 
     pub fn has(&self, path: &str) -> bool {
@@ -43,9 +38,10 @@ impl FileReaderWriter {
     pub fn close_event(&mut self, path: String) {
         if let Some((tx, jh)) = self.handles.get(&path) {
             if let Err(e) = tx.send(SendFileEvent::Close) {
-                eprintln!(
+                err!(
                     "send close event to path FileReaderWriter {:?} error: {:?}",
-                    &path, e
+                    &path,
+                    e
                 );
                 let mut _jh = &*jh;
             }
@@ -53,59 +49,72 @@ impl FileReaderWriter {
         };
     }
 
-    fn open(&mut self, path: String, offset: i64, output: String) {
+    fn open(&mut self, path: String, offset: i64, _output: String) {
         let thread_path = path.clone();
         let database = self.database.clone();
 
         let (tx, rx) = sync_channel::<SendFileEvent>(1);
         let mut offset = offset;
-        let jh = thread::spawn(move || {
-            if let Ok(mut file) = File::open(thread_path.clone()) {
-                let size = file.stream_len().unwrap();
-                // skip to current file end
-                if size as i64 > offset {
-                    offset = size as i64;
-                }
-                if let Err(e) = file.seek(SeekFrom::Current(offset)) {
-                    eprintln!("open event seek failed, error: {:?}", e);
-                    return;
-                }
-                let mut br = BufReader::new(file);
-                let mut bf = String::new();
-                let output = &mut Output::new(FakeOutput);
 
-                loop {
-                    for item in rx.recv() {
-                        match item {
-                            SendFileEvent::Close => {
-                                break;
-                            }
-                            _ => {}
-                        }
-                        let offset = br.read_line(&mut bf).unwrap();
+        let mut file = match File::open(thread_path.clone()) {
+            Ok(file) => file,
+            Err(e) => {
+                err!("open file {:?} error: {:?}", path, e);
+                return;
+            }
+        };
+        if let Err(e) = file.seek(SeekFrom::Current(offset)) {
+            err!("open event seek failed, error: {}", e);
+            return;
+        }
 
-                        if let Err(e) = via_output(bf.as_str(), output) {
-                            eprintln!("{}", e);
-                        }
-                        if let Ok(mut database) = database.try_write() {
-                            database.incr_offset_by_uuid(thread_path.clone(), offset as i64);
-                        } else {
-                            break;
-                        }
+        let file_size = file.stream_len().unwrap();
+        let mut br = BufReader::new(file);
+        let mut bf = String::new();
+        let outputs = OTS.clone();
 
-                        bf.clear();
+        loop {
+            let incr_offset = br.read_line(&mut bf).unwrap();
+            if let Ok(mut ot) = outputs.lock() {
+                ot.output(_output.clone(), bf.as_str())
+            }
+            offset += incr_offset as i64;
+            bf.clear();
+            if offset >= file_size as i64 {
+                break;
+            }
+        }
+
+        let jh = thread::spawn(move || loop {
+            for item in rx.recv() {
+                match item {
+                    SendFileEvent::Close => {
+                        break;
                     }
+                    _ => {}
                 }
+                let incr_offset = br.read_line(&mut bf).unwrap();
+                if let Ok(mut ot) = outputs.lock() {
+                    ot.output(_output.clone(), bf.as_str())
+                }
+
+                if let Ok(mut database) = database.try_write() {
+                    database.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
+                } else {
+                    break;
+                }
+
+                bf.clear();
             }
         });
         self.handles.insert(path.clone(), (tx, jh));
     }
 
-    pub fn open_event(&mut self, path: String, offset: i64, output: String) {
+    pub fn open_event(&mut self, path: String, offset: i64, _output: String) {
         if self.handles.contains_key(&path) {
             return;
         }
-        self.open(path, offset, output)
+        self.open(path, offset, _output)
     }
 
     pub fn write_event(&mut self, path: String) {
@@ -118,13 +127,8 @@ impl FileReaderWriter {
             _ => return,
         };
 
-        match handle.0.send(SendFileEvent::Other) {
-            Err(e) => eprintln!(
-                "FileReaderWriter send write event error: {:?},path: {:?}",
-                e,
-                path.clone()
-            ),
-            _ => {}
+        if let Err(e) = handle.0.send(SendFileEvent::Other) {
+            err!("send write event error: {},path: {}", e, path)
         }
     }
 }
@@ -133,15 +137,10 @@ impl FileReaderWriter {
 mod tests {
     use crate::FileReaderWriter;
     use db::{new_arc_database, Database};
-    use output::{FakeOutput, Output};
-    use std::sync::{Arc, Mutex};
 
     #[test]
     fn it_works() {
-        let fake_output = Arc::new(Mutex::new(Output::new(FakeOutput)));
         let mut input = FileReaderWriter::new(new_arc_database(Database::default()));
-
-        input.set_output("fake_output".to_owned(), fake_output);
         input.open_event("./lib.rs".to_owned(), 0, "fake_output".to_owned());
     }
 }

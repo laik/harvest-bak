@@ -2,7 +2,6 @@ use crate::ConcHashMap;
 use event::obj::Dispatch;
 use event::Listener;
 use serde::{Deserialize, Serialize};
-use std::os::macos::raw::stat;
 use std::{
     hash::Hash,
     sync::{Arc, RwLock},
@@ -84,7 +83,7 @@ impl Default for Pod {
             namespace: "".to_owned(),
             pod_name: "".to_owned(),
             container_name: "".to_owned(),
-            upload: true,
+            upload: false,
             state: State::Running,
             filter: "".to_owned(),
             output: "".to_owned(),

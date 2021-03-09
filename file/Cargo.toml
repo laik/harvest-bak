@@ -17,3 +17,6 @@ path = "../output"
 
 [dependencies.event]
 path = "../event"
+
+[dependencies]
+log = "0.4"
