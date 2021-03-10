@@ -1,7 +1,7 @@
 use db::{Database, GetPod};
 use event::Listener;
 use file::FileReaderWriter;
-use log::{error as err, info, warn};
+use log::{error as err, warn};
 use scan::GetPathEventInfo;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -25,7 +25,19 @@ where
 {
     fn handle(&self, t: T) {
         if let Some(pod) = t.get() {
-            info!("db event add {:?}", pod);
+            if !pod.upload {
+                return;
+            }
+
+            let mut frw = match self.1.lock() {
+                Ok(o) => o,
+                Err(e) => {
+                    err!("{}", e);
+                    return;
+                }
+            };
+
+            frw.open_event(pod.clone());
         }
     }
 }
@@ -56,7 +68,7 @@ where
     T: Clone + GetPod,
 {
     fn handle(&self, t: T) {
-        let mut pod = match t.get() {
+        let pod = match t.get() {
             Some(pod) => pod.clone(),
             _ => return,
         };
@@ -69,23 +81,10 @@ where
             }
         };
 
-        match pod.upload {
-            true => {
-                frw.open_event(
-                    (&*pod.uuid).to_string(),
-                    pod.offset,
-                    (&*pod.output).to_string(),
-                );
-                pod.set_running()
-            }
-            false => {
-                frw.close_event((&*pod.uuid).to_owned());
-                pod.set_stopped()
-            }
-        };
-
-        if let Ok(mut db) = self.0.write() {
-            db.update(pod.uuid.clone(), pod.clone())
+        if !pod.upload {
+            frw.close_event(pod.uuid);
+        } else {
+            frw.open_event(pod);
         }
     }
 }
@@ -102,10 +101,7 @@ where
         };
 
         match self.1.lock() {
-            Ok(mut o) => {
-                info!("event_listener write path {}", path);
-                o.write_event(path)
-            }
+            Ok(mut o) => o.write_event(path),
             Err(e) => {
                 err!("{}", e);
                 return;
@@ -125,19 +121,9 @@ where
             _ => return,
         };
 
-        let mut frw = match self.1.lock() {
-            Ok(o) => o,
-            Err(e) => {
-                err!("{}", e);
-                return;
-            }
-        };
-
-        frw.open_event(pod.uuid.clone(), pod.offset, pod.output.clone());
-
         match self.0.write() {
             Ok(mut o) => {
-                info!("event_listener open {}", pod.uuid.clone());
+                // info!("event_listener open {}", pod.uuid.clone());
                 o.put(pod)
             }
             Err(e) => {
@@ -156,7 +142,7 @@ where
     fn handle(&self, t: T) {
         let pei = t.get().unwrap();
         if let Ok(mut db) = self.0.write() {
-            info!("event_listener close {}", pei.path.to_owned());
+            // info!("event_listener close {}", pei.path.to_owned());
             db.delete(pei.path.to_owned())
         }
     }

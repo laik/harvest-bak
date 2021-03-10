@@ -1,6 +1,6 @@
 #![feature(seek_stream_len)]
-use db::Database;
-use log::error as err;
+use db::{Database, Pod};
+use log::{error as err, warn};
 use output::OTS;
 use std::collections::HashMap;
 use std::fs::File;
@@ -39,7 +39,7 @@ impl FileReaderWriter {
         if let Some((tx, jh)) = self.handles.get(&path) {
             if let Err(e) = tx.send(SendFileEvent::Close) {
                 err!(
-                    "send close event to path FileReaderWriter {:?} error: {:?}",
+                    "frw send close event to path FileReaderWriter {:?} error: {:?}",
                     &path,
                     e
                 );
@@ -59,12 +59,12 @@ impl FileReaderWriter {
         let mut file = match File::open(thread_path.clone()) {
             Ok(file) => file,
             Err(e) => {
-                err!("open file {:?} error: {:?}", path, e);
+                err!("frw open file {:?} error: {:?}", path, e);
                 return;
             }
         };
         if let Err(e) = file.seek(SeekFrom::Current(offset)) {
-            err!("open event seek failed, error: {}", e);
+            err!("frw open event seek failed, error: {}", e);
             return;
         }
 
@@ -110,11 +110,11 @@ impl FileReaderWriter {
         self.handles.insert(path.clone(), (tx, jh));
     }
 
-    pub fn open_event(&mut self, path: String, offset: i64, _output: String) {
-        if self.handles.contains_key(&path) {
+    pub fn open_event(&mut self, pod: Pod) {
+        if self.handles.contains_key(&pod.uuid) {
             return;
         }
-        self.open(path, offset, _output)
+        self.open(pod.uuid.clone(), pod.offset, pod.output);
     }
 
     pub fn write_event(&mut self, path: String) {
@@ -124,11 +124,14 @@ impl FileReaderWriter {
 
         let handle = match self.handles.get(&path) {
             Some(it) => it,
-            _ => return,
+            _ => {
+                warn!("frw not found handle {}", path);
+                return;
+            }
         };
 
         if let Err(e) = handle.0.send(SendFileEvent::Other) {
-            err!("send write event error: {},path: {}", e, path)
+            err!("frw send write event error: {}, path: {}", e, path)
         }
     }
 }
@@ -136,11 +139,11 @@ impl FileReaderWriter {
 #[cfg(test)]
 mod tests {
     use crate::FileReaderWriter;
-    use db::{new_arc_database, Database};
+    use db::{new_arc_database, Database, Pod};
 
     #[test]
     fn it_works() {
         let mut input = FileReaderWriter::new(new_arc_database(Database::default()));
-        input.open_event("./lib.rs".to_owned(), 0, "fake_output".to_owned());
+        input.open_event(Pod::default());
     }
 }
