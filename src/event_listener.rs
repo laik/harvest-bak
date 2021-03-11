@@ -1,24 +1,15 @@
-use db::{MemDatabase, GetPod};
+use super::GLOBAL_RULES;
+use db::{GetPod, MemDatabase};
 use event::Listener;
 use file::FileReaderWriter;
 use log::{error as err, warn};
 use scan::GetPathEventInfo;
 use std::sync::{Arc, Mutex, RwLock};
 
-// TODO
-// event list handle state
-// scanner
-//      close --> fileReaderWriter close
-//      open  --> fileReaderWriter open
-//      write --> fileReaderWriter write
-// db
-//      update --> upload false or true
-//             |
-//             true  --> open file and watch file && output
-//             false --> close save offset
-//
-
-pub(crate) struct DBAddEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct DBAddEvent(
+    pub Arc<RwLock<MemDatabase>>,
+    pub Arc<Mutex<FileReaderWriter>>,
+);
 impl<T> Listener<T> for DBAddEvent
 where
     T: Clone + GetPod,
@@ -42,7 +33,10 @@ where
     }
 }
 
-pub(crate) struct DBDeleteEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct DBDeleteEvent(
+    pub Arc<RwLock<MemDatabase>>,
+    pub Arc<Mutex<FileReaderWriter>>,
+);
 impl<T> Listener<T> for DBDeleteEvent
 where
     T: Clone + GetPod,
@@ -62,7 +56,10 @@ where
     }
 }
 
-pub(crate) struct DBUpdateEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct DBUpdateEvent(
+    pub Arc<RwLock<MemDatabase>>,
+    pub Arc<Mutex<FileReaderWriter>>,
+);
 impl<T> Listener<T> for DBUpdateEvent
 where
     T: Clone + GetPod,
@@ -89,7 +86,10 @@ where
     }
 }
 
-pub(crate) struct ScannerWriteEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct ScannerWriteEvent(
+    pub Arc<RwLock<MemDatabase>>,
+    pub Arc<Mutex<FileReaderWriter>>,
+);
 impl<T> Listener<T> for ScannerWriteEvent
 where
     T: Clone + GetPathEventInfo,
@@ -110,7 +110,10 @@ where
     }
 }
 
-pub(crate) struct ScannerOpenEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct ScannerOpenEvent(
+    pub Arc<RwLock<MemDatabase>>,
+    pub Arc<Mutex<FileReaderWriter>>,
+);
 impl<T> Listener<T> for ScannerOpenEvent
 where
     T: Clone + GetPathEventInfo,
@@ -134,7 +137,10 @@ where
     }
 }
 
-pub(crate) struct ScannerCloseEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct ScannerCloseEvent(
+    pub Arc<RwLock<MemDatabase>>,
+    pub Arc<Mutex<FileReaderWriter>>,
+);
 impl<T> Listener<T> for ScannerCloseEvent
 where
     T: Clone + GetPathEventInfo,

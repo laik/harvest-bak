@@ -236,7 +236,7 @@ impl AutoScanner {
                             }
                         }
                         _ => {
-                            if op.contains(notify::Op::CREATE) && op.contains(notify::Op::WRITE) {
+                            if op == notify::Op::CREATE | notify::Op::WRITE {
                                 match Self::parse_path_to_pei(
                                     self.namespace.to_owned(),
                                     self.dir.clone(),
@@ -246,20 +246,9 @@ impl AutoScanner {
                                     _ => {}
                                 }
                                 continue;
-                            } else if op.contains(notify::Op::REMOVE)
-                                && op.contains(notify::Op::WRITE)
-                            {
-                                match Self::parse_path_to_pei(
-                                    self.namespace.to_owned(),
-                                    self.dir.clone(),
-                                    path.clone(),
-                                ) {
-                                    Some(pei) => self.dispatch_close_event(pei),
-                                    _ => {}
-                                }
-                                continue;
-                            } else if op.contains(notify::Op::CREATE)
-                                && op.contains(notify::Op::REMOVE)
+                            } else if op == notify::Op::CLOSE_WRITE
+                                || op == notify::Op::CREATE | notify::Op::REMOVE | notify::Op::WRITE
+                                || op == notify::Op::CREATE | notify::Op::REMOVE
                             {
                                 match Self::parse_path_to_pei(
                                     self.namespace.to_owned(),

@@ -1,4 +1,4 @@
-use super::serde_json;
+use super::{set_rule, Rule};
 use common::Result;
 use db::MemDatabase;
 use log::{error as err, info};
@@ -7,7 +7,6 @@ use rocket::{get, post};
 use rocket_contrib::json::{Json, JsonValue};
 use serde::{Deserialize, Serialize};
 use sse_client::EventSource;
-
 use std::{
     sync::{Arc, RwLock},
     thread::{self, JoinHandle},
@@ -47,6 +46,16 @@ impl ApiClient {
 
                         for pod in request.pods.iter() {
                             if request.op == RUN {
+                                // first add to global rules
+                                set_rule(
+                                    pod.pod.into(),
+                                    Rule {
+                                        upload: true,
+                                        rule: "".into(),
+                                        output: "".into(),
+                                    },
+                                );
+
                                 match db.try_write() {
                                     Ok(mut db) => {
                                         db.start_upload_pod(
