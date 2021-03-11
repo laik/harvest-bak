@@ -249,6 +249,7 @@ impl AutoScanner {
                             } else if op == notify::Op::CLOSE_WRITE
                                 || op == notify::Op::CREATE | notify::Op::REMOVE | notify::Op::WRITE
                                 || op == notify::Op::CREATE | notify::Op::REMOVE
+                                || op == notify::Op::REMOVE | notify::Op::WRITE
                             {
                                 match Self::parse_path_to_pei(
                                     self.namespace.to_owned(),

@@ -25,13 +25,7 @@ impl Harvest {
     }
 
     pub fn start(&mut self) -> Result<()> {
-        let cfg = Config::build(Environment::Development)
-            .address("0.0.0.0")
-            .port(8080)
-            .unwrap();
-
         let frw = Arc::new(Mutex::new(FileReaderWriter::new(self.database.clone())));
-
         // registry db event handle
         match self.database.write() {
             Ok(mut rwdb) => {
@@ -89,9 +83,14 @@ impl Harvest {
             Ok(it) => it,
             Err(e) => return Err(e),
         };
+
+        let cfg = Config::build(Environment::Production)
+            .address("0.0.0.0")
+            .port(8080)
+            .unwrap();
         let database = self.database.clone();
         rocket::custom(cfg)
-            .mount("/", routes![post_pod, query_pod])
+            .mount("/", routes![post_pod, query_pod, query_rules])
             .register(catchers![not_found])
             .manage(database)
             .launch();

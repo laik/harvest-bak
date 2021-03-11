@@ -22,12 +22,27 @@ pub(crate) use event_listener::{
 pub use server::Harvest;
 
 use log::error as err;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
 
-#[derive(Debug, Clone)]
+type RuleList = Vec<(String, Rule)>;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RuleListMarshaller(RuleList);
+
+impl RuleListMarshaller {
+    pub fn to_json(&self) -> String {
+        match serde_json::to_string(&self.0) {
+            Ok(contents) => contents,
+            Err(_) => "".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct Rule {
     pub(crate) upload: bool,
     pub(crate) rule: String,
@@ -52,6 +67,18 @@ pub(crate) fn set_rule(key: String, value: Rule) {
             err!("{}", e);
         }
     }
+}
+
+pub(crate) fn all_rules() -> String {
+    if let Ok(db) = GLOBAL_RULES.read() {
+        return RuleListMarshaller(
+            db.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<(String, Rule)>>(),
+        )
+        .to_json();
+    }
+    "".into()
 }
 
 pub(crate) fn get_rule(key: String) -> Option<Rule> {

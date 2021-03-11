@@ -1,4 +1,4 @@
-use super::{set_rule, Rule};
+use super::{all_rules, set_rule, Rule};
 use common::Result;
 use db::MemDatabase;
 use log::{error as err, info};
@@ -128,6 +128,11 @@ pub(crate) struct Request {
     filter: String,
     output: String,
     upload: bool,
+}
+
+#[get("/rules")]
+pub(crate) fn query_rules() -> JsonValue {
+    json!({"status":"ok","reason":format!("{}",all_rules())})
 }
 
 // /pod/collect list ns.pod start collect to output
