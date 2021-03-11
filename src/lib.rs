@@ -5,9 +5,13 @@ extern crate rocket_contrib;
 #[macro_use]
 extern crate rocket;
 
+mod api;
 mod event_listener;
 mod server;
 
+pub use serde_json;
+
+pub(crate) use api::*;
 pub use common::Result;
 pub(crate) use event_listener::{
     DBAddEvent, DBDeleteEvent, DBUpdateEvent, ScannerCloseEvent, ScannerOpenEvent,

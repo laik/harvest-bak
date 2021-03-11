@@ -1,4 +1,4 @@
-use db::{Database, GetPod};
+use db::{MemDatabase, GetPod};
 use event::Listener;
 use file::FileReaderWriter;
 use log::{error as err, warn};
@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, RwLock};
 //             false --> close save offset
 //
 
-pub(crate) struct DBAddEvent(pub Arc<RwLock<Database>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct DBAddEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
 impl<T> Listener<T> for DBAddEvent
 where
     T: Clone + GetPod,
@@ -42,7 +42,7 @@ where
     }
 }
 
-pub(crate) struct DBDeleteEvent(pub Arc<RwLock<Database>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct DBDeleteEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
 impl<T> Listener<T> for DBDeleteEvent
 where
     T: Clone + GetPod,
@@ -62,7 +62,7 @@ where
     }
 }
 
-pub(crate) struct DBUpdateEvent(pub Arc<RwLock<Database>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct DBUpdateEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
 impl<T> Listener<T> for DBUpdateEvent
 where
     T: Clone + GetPod,
@@ -89,7 +89,7 @@ where
     }
 }
 
-pub(crate) struct ScannerWriteEvent(pub Arc<RwLock<Database>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct ScannerWriteEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
 impl<T> Listener<T> for ScannerWriteEvent
 where
     T: Clone + GetPathEventInfo,
@@ -110,7 +110,7 @@ where
     }
 }
 
-pub(crate) struct ScannerOpenEvent(pub Arc<RwLock<Database>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct ScannerOpenEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
 impl<T> Listener<T> for ScannerOpenEvent
 where
     T: Clone + GetPathEventInfo,
@@ -134,7 +134,7 @@ where
     }
 }
 
-pub(crate) struct ScannerCloseEvent(pub Arc<RwLock<Database>>, pub Arc<Mutex<FileReaderWriter>>);
+pub(crate) struct ScannerCloseEvent(pub Arc<RwLock<MemDatabase>>, pub Arc<Mutex<FileReaderWriter>>);
 impl<T> Listener<T> for ScannerCloseEvent
 where
     T: Clone + GetPathEventInfo,

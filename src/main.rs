@@ -8,16 +8,15 @@ pub struct ServerOptions {
     #[structopt(short, long)]
     namespace: String,
 
-    // // short and long flags (-o, --ouput) will be deduced from the field's name
-    // #[structopt(short = "o", long)]
-    // output: String,
+    // // short and long flags (-s, --server) will be deduced from the field's name
+    #[structopt(short = "o", long)]
+    output: String,
 
     // short and long flags (-d, --dir) will be deduced from the field's name
     #[structopt(short = "d", long)]
     dir: String,
 }
-// cargo run -- --namespace xx --path /var/log/container 
-// --output kafka@127.0.0.1:9092 ?
+// cargo run -- --namespace xx --path /var/log/container --server http://localhost:9999/
 
 fn main() -> Result<()> {
     // let opt = ServerOptions::from_args();
@@ -26,6 +25,8 @@ fn main() -> Result<()> {
     Harvest::new(
         "default".to_owned(),
         "/Users/dxp/workspace/go/src/github.com/laik/harvest/tmp".to_owned(),
+        "http://localhost:9999/".to_owned(),
+        "node1".to_owned(),
     )
     .start()
 }

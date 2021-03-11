@@ -1,7 +1,8 @@
 #![feature(seek_stream_len)]
-use db::{Database, Pod};
+use db::{MemDatabase, Pod};
 use log::{error as err, warn};
 use output::OTS;
+use serde_json::json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -17,11 +18,11 @@ pub enum SendFileEvent {
 
 pub struct FileReaderWriter {
     handles: HashMap<String, (SyncSender<SendFileEvent>, JoinHandle<()>)>,
-    database: Arc<RwLock<Database>>,
+    database: Arc<RwLock<MemDatabase>>,
 }
 
 impl FileReaderWriter {
-    pub fn new(database: Arc<RwLock<Database>>) -> Self {
+    pub fn new(database: Arc<RwLock<MemDatabase>>) -> Self {
         Self {
             handles: HashMap::new(),
             database,
@@ -49,17 +50,17 @@ impl FileReaderWriter {
         };
     }
 
-    fn open(&mut self, path: String, offset: i64, _output: String) {
-        let thread_path = path.clone();
+    fn open(&mut self, pod: Pod) {
+        let thread_path = pod.uuid.clone();
         let database = self.database.clone();
 
         let (tx, rx) = sync_channel::<SendFileEvent>(1);
-        let mut offset = offset;
+        let mut offset = pod.offset;
 
         let mut file = match File::open(thread_path.clone()) {
             Ok(file) => file,
             Err(e) => {
-                err!("frw open file {:?} error: {:?}", path, e);
+                err!("frw open file {:?} error: {:?}", pod.uuid, e);
                 return;
             }
         };
@@ -76,7 +77,7 @@ impl FileReaderWriter {
         loop {
             let incr_offset = br.read_line(&mut bf).unwrap();
             if let Ok(mut ot) = outputs.lock() {
-                ot.output(_output.clone(), bf.as_str())
+                ot.output(pod.output.clone(), &encode_message(&pod, bf.as_str()))
             }
             offset += incr_offset as i64;
             bf.clear();
@@ -85,6 +86,7 @@ impl FileReaderWriter {
             }
         }
 
+        let thread_pod = pod.clone();
         let jh = thread::spawn(move || loop {
             for item in rx.recv() {
                 match item {
@@ -95,7 +97,10 @@ impl FileReaderWriter {
                 }
                 let incr_offset = br.read_line(&mut bf).unwrap();
                 if let Ok(mut ot) = outputs.lock() {
-                    ot.output(_output.clone(), bf.as_str())
+                    ot.output(
+                        thread_pod.output.clone(),
+                        &encode_message(&thread_pod, bf.as_str()),
+                    )
                 }
 
                 if let Ok(mut database) = database.try_write() {
@@ -107,19 +112,38 @@ impl FileReaderWriter {
                 bf.clear();
             }
         });
-        self.handles.insert(path.clone(), (tx, jh));
+        self.handles.insert(pod.uuid, (tx, jh));
     }
 
     pub fn open_event(&mut self, pod: Pod) {
         if self.handles.contains_key(&pod.uuid) {
             return;
         }
-        self.open(pod.uuid.clone(), pod.offset, pod.output);
+        self.open(pod);
     }
 
     pub fn write_event(&mut self, path: String) {
+        let mut pod = None;
         if !self.handles.contains_key(&path) {
-            self.open(path.clone(), 0, "".to_owned())
+            match self.database.read() {
+                Ok(db) => {
+                    match db.get(path.clone()) {
+                        Some(it) => {
+                            if !it.upload {
+                                return;
+                            }
+                            pod = Some(it.clone());
+                        }
+                        None => {
+                            return;
+                        }
+                    };
+                }
+                Err(e) => {
+                    err!("frw write event read db error {:?}", e)
+                }
+            }
+            self.open(pod.unwrap());
         }
 
         let handle = match self.handles.get(&path) {
@@ -136,14 +160,31 @@ impl FileReaderWriter {
     }
 }
 
+fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
+    if message.len() == 0 {
+        return "".to_owned();
+    }
+    json!({"custom":
+            {
+            "nodeId":pod.pod_name,
+            "container":pod.container_name,
+            "serviceName":pod.pod_name,
+            "ips":["172.0.0.1"],
+            "version":"v1.0.0"
+            },
+        "message":message}
+    )
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::FileReaderWriter;
-    use db::{new_arc_database, Database, Pod};
+    use db::{new_arc_database, MemDatabase, Pod};
 
     #[test]
     fn it_works() {
-        let mut input = FileReaderWriter::new(new_arc_database(Database::default()));
+        let mut input = FileReaderWriter::new(new_arc_database(MemDatabase::default()));
         input.open_event(Pod::default());
     }
 }

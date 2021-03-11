@@ -1,25 +1,26 @@
 use super::*;
-use db::Database;
+use db::MemDatabase;
 use file::FileReaderWriter;
 use rocket::config::{Config, Environment};
-use rocket::State;
-use rocket::{get, post, routes};
-use rocket_contrib::json::{Json, JsonValue};
+use rocket::routes;
 use scan::AutoScanner;
-use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 pub struct Harvest {
+    node_name: String,
+    api_server_addr: String,
     scanner: Arc<RwLock<AutoScanner>>,
-    database: Arc<RwLock<Database>>,
+    database: Arc<RwLock<MemDatabase>>,
 }
 
 impl Harvest {
-    pub fn new(namespace: String, dir: String) -> Self {
+    pub fn new(namespace: String, dir: String, api_server_addr: String, node_name: String) -> Self {
         Self {
+            node_name,
+            api_server_addr,
             scanner: Arc::new(RwLock::new(AutoScanner::new(namespace, dir))),
-            database: Arc::new(RwLock::new(Database::default())),
+            database: Arc::new(RwLock::new(MemDatabase::default())),
         }
     }
 
@@ -83,6 +84,11 @@ impl Harvest {
             }
         });
 
+        let mut api_client = ApiClient::new(self.database.clone());
+        let jh2 = match api_client.watch(&self.api_server_addr, &self.node_name) {
+            Ok(it) => it,
+            Err(e) => return Err(e),
+        };
         let database = self.database.clone();
         rocket::custom(cfg)
             .mount("/", routes![post_pod, query_pod])
@@ -91,74 +97,8 @@ impl Harvest {
             .launch();
 
         _jh.join().unwrap();
+        jh2.join().unwrap();
 
         Ok(())
     }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Request {
-    namespace: String,
-    pod: String,
-    filter: String,
-    output: String,
-    upload: bool,
-}
-
-// /pod/collect list ns.pod start collect to output
-#[post("/pod", format = "json", data = "<req>")]
-fn post_pod(req: Json<Request>, db: State<'_, Arc<RwLock<Database>>>) -> JsonValue {
-    if req.0.namespace == "" || req.0.pod == "" {
-        return json!({
-            "status": "error",
-            "reason": format!("namespace {} or pod {} maybe is empty",req.namespace,req.pod),
-        });
-    }
-
-    match db.write() {
-        Ok(mut db) => {
-            for item in db.get_by_ns_pod(req.0.namespace, req.0.pod).iter() {
-                if let Some((uuid, pod)) = item {
-                    let mut pod = pod.to_owned();
-                    pod.upload = req.0.upload;
-                    pod.filter = req.0.filter.clone();
-                    pod.output = req.0.output.clone();
-                    db.update(uuid.to_owned(), pod);
-                }
-            }
-            json!({"status":"ok"})
-        }
-        Err(e) => {
-            json!({
-            "status":"error",
-            "reason":format!("DB Lock Failure error {}",e)
-            })
-        }
-    }
-}
-
-#[get("/pod")]
-fn query_pod(db: State<'_, Arc<RwLock<Database>>>) -> JsonValue {
-    match db.read() {
-        Ok(_db) => {
-            json!({"status":"ok","reason":format!("{:?}",_db.all().to_json())})
-        }
-        Err(e) => {
-            json!({"status":"error","reason":format!("{}",e)})
-        }
-    }
-}
-
-#[catch(404)]
-fn not_found() -> JsonValue {
-    json!({
-        "status": "error",
-        "reason": "Resource was not found."
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {}
 }

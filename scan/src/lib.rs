@@ -1,5 +1,5 @@
 use common::Result;
-use db::{Database, Pod};
+use db::{MemDatabase, Pod};
 use event::{obj::Listener, Dispatch};
 use notify::{raw_watcher, RawEvent, RecursiveMode, Watcher};
 use std::sync::RwLock;
@@ -60,7 +60,7 @@ impl PathEventInfo {
 unsafe impl Sync for PathEventInfo {}
 unsafe impl Send for PathEventInfo {}
 
-pub type ScannerRecvArgument = (PathEventInfo, Arc<RwLock<Database>>);
+pub type ScannerRecvArgument = (PathEventInfo, Arc<RwLock<MemDatabase>>);
 
 impl GetPathEventInfo for ScannerRecvArgument {
     fn get(&self) -> Option<&PathEventInfo> {
@@ -195,7 +195,6 @@ impl AutoScanner {
         // below will be monitored for changes.
         watcher.watch(&self.dir, RecursiveMode::Recursive)?;
 
-        let _cw = notify::Op::CREATE | notify::Op::WRITE;
         loop {
             match rx.recv() {
                 Ok(RawEvent {
@@ -237,13 +236,37 @@ impl AutoScanner {
                             }
                         }
                         _ => {
-                            if _cw.contains(op) {
+                            if op.contains(notify::Op::CREATE) && op.contains(notify::Op::WRITE) {
                                 match Self::parse_path_to_pei(
                                     self.namespace.to_owned(),
                                     self.dir.clone(),
                                     path.clone(),
                                 ) {
-                                    Some(pei) => self.dispatch_write_event(pei),
+                                    Some(pei) => self.dispatch_open_event(pei),
+                                    _ => {}
+                                }
+                                continue;
+                            } else if op.contains(notify::Op::REMOVE)
+                                && op.contains(notify::Op::WRITE)
+                            {
+                                match Self::parse_path_to_pei(
+                                    self.namespace.to_owned(),
+                                    self.dir.clone(),
+                                    path.clone(),
+                                ) {
+                                    Some(pei) => self.dispatch_close_event(pei),
+                                    _ => {}
+                                }
+                                continue;
+                            } else if op.contains(notify::Op::CREATE)
+                                && op.contains(notify::Op::REMOVE)
+                            {
+                                match Self::parse_path_to_pei(
+                                    self.namespace.to_owned(),
+                                    self.dir.clone(),
+                                    path.clone(),
+                                ) {
+                                    Some(pei) => self.dispatch_close_event(pei),
                                     _ => {}
                                 }
                                 continue;

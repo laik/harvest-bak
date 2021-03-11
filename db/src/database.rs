@@ -1,14 +1,14 @@
-use crate::ConcHashMap;
 use event::obj::Dispatch;
 use event::Listener;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::{
     hash::Hash,
     sync::{Arc, RwLock},
 };
 use strum::AsRefStr;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum State {
     Ready,
     Running,
@@ -52,7 +52,7 @@ pub trait GetPod {
     fn get(&self) -> Option<&Pod>;
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Pod {
     // on this the uuid path is unique identifier
     pub uuid: String,
@@ -72,6 +72,17 @@ impl Pod {
     }
     pub fn set_stopped(&mut self) {
         self.state = State::Stopped;
+    }
+    pub fn upload(&mut self) {
+        self.upload = true;
+    }
+    pub fn unupload(&mut self) {
+        self.upload = false;
+    }
+    pub(crate) fn merge_with(&mut self, other: &Pod) {
+        self.upload = other.upload;
+        self.filter = other.clone().filter;
+        self.output = other.clone().output;
     }
 }
 
@@ -110,21 +121,24 @@ impl PodListMarshaller {
         }
     }
 }
-pub struct Database {
+
+pub type UUID = String;
+
+pub struct MemDatabase {
     // pod key is the pod path uuid
-    pods: ConcHashMap<String, Pod>,
+    pods: HashMap<UUID, Pod>,
     // pod op registry and handle events
     event_dispatch: Dispatch<Pod>,
 }
 
-impl Database {
+impl MemDatabase {
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn default() -> Self {
         Self {
-            pods: ConcHashMap::<String, Pod>::new(),
+            pods: HashMap::<UUID, Pod>::new(),
             event_dispatch: Dispatch::<Pod>::new(),
         }
     }
@@ -163,29 +177,33 @@ impl Database {
     }
 
     pub fn get(&self, uuid: String) -> Option<&Pod> {
-        match self.pods.find(&*uuid) {
-            Some(v) => Some(v.get()),
+        match self.pods.get(&uuid) {
+            Some(v) => Some(&v),
             _ => None,
         }
     }
 
     pub fn incr_offset_by_uuid(&mut self, uuid: String, incr_size: i64) {
-        if let Some(mut v) = self.pods.find_mut(&uuid) {
-            v.get().offset += incr_size
+        if let Some(mut v) = self.pods.get_mut(&uuid) {
+            v.offset += incr_size
         }
     }
 
-    pub fn get_by_ns_pod(&self, ns: String, pod: String) -> Vec<Option<(String, Pod)>> {
-        self.pods
+    pub fn get_slice_by_ns_pod(&self, ns: String, pod: String) -> Vec<(String, Pod)> {
+        let result = self
+            .pods
             .iter()
-            .map(|(k, v)| {
-                if v.namespace == ns && v.pod_name == pod {
-                    Some((k.clone(), v.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
+            .filter(|(_, v)| v.namespace == ns && v.pod_name == pod)
+            .map(|(uuid, pod)| (uuid.clone(), pod.clone()))
+            .collect::<Vec<(String, Pod)>>();
+        result
+    }
+
+    pub fn apply(&mut self, pod: &Pod) {
+        self.pods
+            .entry((*pod).uuid.to_string())
+            .or_insert(pod.clone())
+            .merge_with(pod)
     }
 
     pub fn put(&mut self, pod: Pod) {
@@ -194,25 +212,20 @@ impl Database {
             .dispatch(Event::Add.as_ref().to_string(), pod.clone());
     }
 
-    pub fn delete_by_ns_pod(&mut self, ns: String, pod: String) {
-        let need_deleted_list = self
+    pub fn delete_by_ns_pod(&mut self, ns: String, pod_name: String) {
+        let need_delete_list = self
             .pods
             .iter()
-            .map(|(k, v)| {
-                if v.namespace == ns && v.pod_name == pod {
-                    self.pods.remove(k);
-                    Some((k, v))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+            .filter(|(_, pod)| pod.namespace == ns || pod.pod_name == pod_name)
+            .map(|(_, v)| v.clone())
+            .collect::<Vec<Pod>>();
 
-        for item in need_deleted_list.iter() {
-            if let Some((_, _pod)) = item {
-                self.event_dispatch
-                    .dispatch(Event::Delete.as_ref().to_string(), (**_pod).clone());
-            }
+        for pod in need_delete_list.iter() {
+            self.pods.remove(&pod.uuid);
+        }
+
+        for pod in need_delete_list.iter() {
+            self.dispatch_delete(pod.clone());
         }
     }
 
@@ -223,14 +236,45 @@ impl Database {
         }
     }
 
-    pub fn update(&mut self, uuid: String, v: Pod) {
-        self.pods.insert(uuid, v.clone());
+    fn dispatch_update(&mut self, pod: Pod) {
         self.event_dispatch
-            .dispatch(Event::Delete.as_ref().to_string(), v);
+            .dispatch(Event::Update.as_ref().to_string(), pod);
+    }
+
+    fn dispatch_delete(&mut self, pod: Pod) {
+        self.event_dispatch
+            .dispatch(Event::Delete.as_ref().to_string(), pod);
+    }
+
+    fn dispatch_insert(&mut self, pod: Pod) {
+        self.event_dispatch
+            .dispatch(Event::Add.as_ref().to_string(), pod);
+    }
+
+    pub fn stop_upload_pod(&mut self, ns: String, pod_name: String) {
+        let res = self.get_slice_by_ns_pod(ns.clone(), pod_name.clone());
+        for (uuid, pod) in res.iter() {
+            let mut pod = pod.clone();
+            pod.unupload();
+            pod.set_stopped();
+            self.pods.insert(uuid.clone(), pod.clone());
+            self.dispatch_update(pod);
+        }
+    }
+
+    pub fn start_upload_pod(&mut self, ns: String, pod_name: String) {
+        let res = self.get_slice_by_ns_pod(ns.clone(), pod_name.clone());
+        for (uuid, pod) in res.iter() {
+            let mut pod = pod.clone();
+            pod.upload();
+            pod.set_running();
+            self.pods.insert(uuid.clone(), pod.clone());
+            self.dispatch_update(pod);
+        }
     }
 }
 
-pub fn new_arc_database(db: Database) -> Arc<RwLock<Database>> {
+pub fn new_arc_database(db: MemDatabase) -> Arc<RwLock<MemDatabase>> {
     Arc::new(RwLock::new(db))
 }
 

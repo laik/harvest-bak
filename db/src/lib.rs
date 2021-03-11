@@ -1,13 +1,7 @@
-pub use spin;
-
-mod map;
-mod table;
-
-pub use map::*;
-pub use table::Accessor;
+#[warn(mutable_borrow_reservation_conflict)]
 mod database;
 
-pub use database::{new_arc_database, Database, Event, GetPod, Pod, State};
+pub use database::{new_arc_database, Event, GetPod, MemDatabase, Pod, State};
 
 #[cfg(test)]
 mod tests {
