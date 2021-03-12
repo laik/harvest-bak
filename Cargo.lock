@@ -243,10 +243,11 @@ name = "db"
 version = "0.1.0"
 dependencies = [
  "common",
+ "crossbeam-channel",
  "event",
+ "lazy_static",
  "serde",
  "serde_json",
- "spin",
  "strum",
 ]
 
@@ -1090,12 +1091,6 @@ name = "smallvec"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
-
-[[package]]
-name = "spin"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13287b4da9d1207a4f4929ac390916d64eacfe236a487e9a9f5b3be392be5162"
 
 [[package]]
 name = "sse-client"

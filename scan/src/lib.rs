@@ -1,5 +1,5 @@
 use common::Result;
-use db::{MemDatabase, Pod};
+use db::{AMemDatabase, Pod};
 use event::{obj::Listener, Dispatch};
 use notify::{raw_watcher, RawEvent, RecursiveMode, Watcher};
 use std::sync::RwLock;
@@ -27,9 +27,9 @@ pub trait GetDebug {
 
 #[derive(Debug, Clone)]
 pub struct PathEventInfo {
-    pub(crate) namespace: String,
-    pub(crate) pod: String,
-    pub(crate) container: String,
+    pub namespace: String,
+    pub pod: String,
+    pub container: String,
     pub path: String,
 }
 
@@ -60,7 +60,7 @@ impl PathEventInfo {
 unsafe impl Sync for PathEventInfo {}
 unsafe impl Send for PathEventInfo {}
 
-pub type ScannerRecvArgument = (PathEventInfo, Arc<RwLock<MemDatabase>>);
+pub type ScannerRecvArgument = (PathEventInfo, AMemDatabase);
 
 impl GetPathEventInfo for ScannerRecvArgument {
     fn get(&self) -> Option<&PathEventInfo> {

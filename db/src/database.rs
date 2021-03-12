@@ -2,10 +2,7 @@ use event::obj::Dispatch;
 use event::Listener;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::{
-    hash::Hash,
-    sync::{Arc, RwLock},
-};
+use std::hash::Hash;
 use strum::AsRefStr;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -64,6 +61,7 @@ pub struct Pod {
     pub state: State,
     pub filter: String,
     pub output: String,
+    pub ips: Vec<String>,
 }
 
 impl Pod {
@@ -97,7 +95,8 @@ impl Default for Pod {
             upload: false,
             state: State::Running,
             filter: "".into(),
-            output: "counter_output".into(),
+            output: "".into(),
+            ips: Vec::new(),
         }
     }
 }
@@ -122,28 +121,28 @@ impl PodListMarshaller {
     }
 }
 
-pub type UUID = String;
+pub(crate) type UUID = String;
 
-pub struct MemDatabase {
+pub(crate) struct MemDatabase {
     // pod key is the pod path uuid
-    pods: HashMap<UUID, Pod>,
+    pub(crate) pods: HashMap<UUID, Pod>,
     // pod op registry and handle events
     event_dispatch: Dispatch<Pod>,
 }
 
 impl MemDatabase {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn default() -> Self {
+    pub(crate) fn default() -> Self {
         Self {
             pods: HashMap::<UUID, Pod>::new(),
             event_dispatch: Dispatch::<Pod>::new(),
         }
     }
 
-    pub fn append_add_event<L>(&mut self, l: L)
+    pub(crate) fn append_add_event<L>(&mut self, l: L)
     where
         L: Listener<Pod> + Send + Sync + 'static,
     {
@@ -151,7 +150,7 @@ impl MemDatabase {
             .registry(Event::Add.as_ref().to_string(), l)
     }
 
-    pub fn append_delete_event<L>(&mut self, l: L)
+    pub(crate) fn append_delete_event<L>(&mut self, l: L)
     where
         L: Listener<Pod> + Send + Sync + 'static,
     {
@@ -159,7 +158,7 @@ impl MemDatabase {
             .registry(Event::Delete.as_ref().to_string(), l)
     }
 
-    pub fn append_update_event<L>(&mut self, l: L)
+    pub(crate) fn append_update_event<L>(&mut self, l: L)
     where
         L: Listener<Pod> + Send + Sync + 'static,
     {
@@ -167,7 +166,7 @@ impl MemDatabase {
             .registry(Event::Update.as_ref().to_string(), l)
     }
 
-    pub fn all(&self) -> PodListMarshaller {
+    pub(crate) fn all(&self) -> PodListMarshaller {
         PodListMarshaller(
             self.pods
                 .iter()
@@ -176,20 +175,13 @@ impl MemDatabase {
         )
     }
 
-    pub fn get(&self, uuid: String) -> Option<&Pod> {
-        match self.pods.get(&uuid) {
-            Some(v) => Some(&v),
-            _ => None,
-        }
-    }
-
-    pub fn incr_offset_by_uuid(&mut self, uuid: String, incr_size: i64) {
+    pub(crate) fn incr_offset_by_uuid(&mut self, uuid: String, incr_size: i64) {
         if let Some(mut v) = self.pods.get_mut(&uuid) {
             v.offset += incr_size
         }
     }
 
-    pub fn get_slice_by_ns_pod(&self, ns: String, pod: String) -> Vec<(String, Pod)> {
+    pub(crate) fn get_slice_by_ns_pod(&self, ns: String, pod: String) -> Vec<(String, Pod)> {
         let result = self
             .pods
             .iter()
@@ -199,20 +191,19 @@ impl MemDatabase {
         result
     }
 
-    pub fn apply(&mut self, pod: &Pod) {
+    pub(crate) fn apply(&mut self, pod: &Pod) {
         self.pods
             .entry((*pod).uuid.to_string())
             .or_insert(pod.clone())
             .merge_with(pod)
     }
 
-    pub fn put(&mut self, pod: Pod) {
+    pub(crate) fn put(&mut self, pod: Pod) {
         self.pods.insert(pod.uuid.clone(), pod.clone());
-        self.event_dispatch
-            .dispatch(Event::Add.as_ref().to_string(), pod.clone());
+        self.dispatch_add(pod.clone());
     }
 
-    pub fn delete_by_ns_pod(&mut self, ns: String, pod_name: String) {
+    pub(crate) fn delete_by_ns_pod(&mut self, ns: String, pod_name: String) {
         let need_delete_list = self
             .pods
             .iter()
@@ -229,10 +220,9 @@ impl MemDatabase {
         }
     }
 
-    pub fn delete(&mut self, uuid: String) {
+    pub(crate) fn delete(&mut self, uuid: String) {
         if let Some(pod) = self.pods.remove(&*uuid) {
-            self.event_dispatch
-                .dispatch(Event::Delete.as_ref().to_string(), pod);
+            self.dispatch_delete(pod);
         }
     }
 
@@ -246,12 +236,12 @@ impl MemDatabase {
             .dispatch(Event::Delete.as_ref().to_string(), pod);
     }
 
-    fn dispatch_insert(&mut self, pod: Pod) {
+    fn dispatch_add(&mut self, pod: Pod) {
         self.event_dispatch
             .dispatch(Event::Add.as_ref().to_string(), pod);
     }
 
-    pub fn stop_upload_pod(&mut self, ns: String, pod_name: String) {
+    pub(crate) fn stop_upload_pod(&mut self, ns: String, pod_name: String) {
         let res = self.get_slice_by_ns_pod(ns.clone(), pod_name.clone());
         for (uuid, pod) in res.iter() {
             let mut pod = pod.clone();
@@ -262,7 +252,7 @@ impl MemDatabase {
         }
     }
 
-    pub fn start_upload_pod(&mut self, ns: String, pod_name: String) {
+    pub(crate) fn start_upload_pod(&mut self, ns: String, pod_name: String) {
         let res = self.get_slice_by_ns_pod(ns.clone(), pod_name.clone());
         for (uuid, pod) in res.iter() {
             let mut pod = pod.clone();
@@ -272,10 +262,6 @@ impl MemDatabase {
             self.dispatch_update(pod);
         }
     }
-}
-
-pub fn new_arc_database(db: MemDatabase) -> Arc<RwLock<MemDatabase>> {
-    Arc::new(RwLock::new(db))
 }
 
 #[cfg(test)]

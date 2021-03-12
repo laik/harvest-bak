@@ -117,7 +117,7 @@ impl IOutput for FakeOutput {
 
 pub struct Counter(AtomicUsize);
 impl IOutput for Counter {
-    fn write(&mut self, item: Item) -> Result<()> {
+    fn write(&mut self, _: Item) -> Result<()> {
         self.0.fetch_add(1, Ordering::SeqCst);
         if self.0.load(Ordering::Relaxed) as i64 % 10000 == 0 {
             println!("Kafka counter {:?}", self.0.load(Ordering::Relaxed));
@@ -161,27 +161,27 @@ mod tests {
     #[test]
     fn it_works_with_outputs() {
         let mut outputs = Outputs::new();
-        outputs.registry_output("fake_output".to_owned(), Output::new(FakeOutput));
-        outputs.output("fake_output".to_owned(), "123")
+        outputs.registry_output("fake_output".into(), Output::new(FakeOutput));
+        outputs.output("fake_output".into(), "123")
     }
 
     #[test]
     fn it_static_outputs() {
         if let Ok(mut ots) = OUTPUTS.try_lock() {
-            ots.output("fake_output".to_owned(), "1")
+            ots.output("fake_output".into(), "1")
         }
         let mut j = vec![];
         let o1 = OUTPUTS.clone();
         j.push(thread::spawn(move || {
             if let Ok(mut ots) = o1.try_lock() {
-                ots.output("fake_output".to_owned(), "2")
+                ots.output("fake_output".into(), "2")
             }
         }));
 
         let o2 = OUTPUTS.clone();
         j.push(thread::spawn(move || {
             if let Ok(mut ots) = o2.try_lock() {
-                ots.output("fake_output".to_owned(), "3")
+                ots.output("fake_output".into(), "3")
             }
         }));
 

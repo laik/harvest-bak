@@ -21,6 +21,7 @@ pub(crate) use event_listener::{
 };
 pub use server::Harvest;
 
+use db::AMDB;
 use log::error as err;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -46,7 +47,21 @@ impl RuleListMarshaller {
 pub(crate) struct Rule {
     pub(crate) upload: bool,
     pub(crate) rule: String,
+    pub(crate) service_name: String,
+    pub(crate) ns: String,
     pub(crate) output: String,
+}
+
+impl Default for Rule {
+    fn default() -> Self {
+        Self {
+            upload: false,
+            rule: "".into(),
+            service_name: "".into(),
+            ns: "".into(),
+            output: "".into(),
+        }
+    }
 }
 
 pub(crate) type RuleStorage = Arc<RwLock<HashMap<String, Rule>>>;
@@ -69,7 +84,7 @@ pub(crate) fn set_rule(key: String, value: Rule) {
     }
 }
 
-pub(crate) fn all_rules() -> String {
+pub(crate) fn rules_json() -> String {
     if let Ok(db) = GLOBAL_RULES.read() {
         return RuleListMarshaller(
             db.iter()
@@ -79,6 +94,24 @@ pub(crate) fn all_rules() -> String {
         .to_json();
     }
     "".into()
+}
+
+pub(crate) fn apply_rules() {
+    let mut amdb = AMDB.clone();
+    if let Ok(hm) = GLOBAL_RULES.read() {
+        for (pod_name, rule) in hm.iter() {
+            let mut result_pod_list = vec![];
+            for (_, mut v) in AMDB.get_slice_by_ns_pod(rule.ns.clone(), pod_name.clone()) {
+                if rule.upload {
+                    v.upload();
+                }
+                result_pod_list.push(v.clone());
+            }
+            for p in result_pod_list {
+                amdb.apply(&p);
+            }
+        }
+    }
 }
 
 pub(crate) fn get_rule(key: String) -> Option<Rule> {

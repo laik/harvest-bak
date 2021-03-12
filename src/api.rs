@@ -1,6 +1,6 @@
-use super::{all_rules, set_rule, Rule};
+use super::{rules_json, set_rule, Rule};
 use common::Result;
-use db::MemDatabase;
+use db::AMemDatabase;
 use log::{error as err, info};
 use rocket::State;
 use rocket::{get, post};
@@ -16,12 +16,12 @@ const RUN: &'static str = "run";
 const STOP: &'static str = "stop";
 
 pub struct ApiClient {
-    database: Arc<RwLock<MemDatabase>>,
+    amdb: AMemDatabase,
 }
 
 impl ApiClient {
-    pub fn new(memdb: Arc<RwLock<MemDatabase>>) -> Self {
-        Self { database: memdb }
+    pub fn new(memdb: AMemDatabase) -> Self {
+        Self { amdb: memdb }
     }
 
     pub(crate) fn watch(&mut self, addr: &str, node_name: &str) -> Result<JoinHandle<()>> {
@@ -34,7 +34,7 @@ impl ApiClient {
         };
 
         let node_name = node_name.to_owned();
-        let db = self.database.clone();
+        // let mut amdb = self.amdb.clone();
         let jh = thread::spawn(move || {
             info!("🚀 start watch to api server");
             for event in event_sources.receiver().iter() {
@@ -51,34 +51,14 @@ impl ApiClient {
                                     pod.pod.into(),
                                     Rule {
                                         upload: true,
-                                        rule: "".into(),
-                                        output: "".into(),
+                                        ..Default::default()
                                     },
                                 );
 
-                                match db.try_write() {
-                                    Ok(mut db) => {
-                                        db.start_upload_pod(
-                                            request.ns.to_owned(),
-                                            pod.pod.to_owned(),
-                                        );
-                                        info!(
-                                            "api server event source start run ns {:?} pod {:?}",
-                                            request.ns, pod.pod,
-                                        );
-                                    }
-                                    Err(e) => {
-                                        err!("{}", e)
-                                    }
-                                };
+                                // 导致死锁！！！！
+                                // amdb.start_upload_pod(request.ns.into(), pod.pod.into());
                             } else if request.op == STOP {
-                                match db.try_write() {
-                                    Ok(mut db) => db
-                                        .stop_upload_pod(request.ns.to_owned(), pod.pod.to_owned()),
-                                    Err(e) => {
-                                        err!("{}", e)
-                                    }
-                                }
+                                // amdb.stop_upload_pod(request.ns.into(), pod.pod.into());
                             } else {
                                 info!("api server event source send unknow event {:?}", request)
                             }
@@ -132,12 +112,12 @@ pub(crate) struct Request {
 
 #[get("/rules")]
 pub(crate) fn query_rules() -> JsonValue {
-    json!({"status":"ok","reason":format!("{}",all_rules())})
+    json!({"status":"ok","reason":format!("{}",rules_json())})
 }
 
 // /pod/collect list ns.pod start collect to output
 #[post("/pod", format = "json", data = "<req>")]
-pub(crate) fn post_pod(req: Json<Request>, db: State<'_, Arc<RwLock<MemDatabase>>>) -> JsonValue {
+pub(crate) fn post_pod(req: Json<Request>, db: State<'_, AMemDatabase>) -> JsonValue {
     if req.0.namespace == "" || req.0.pod == "" {
         return json!({
             "status": "error",
@@ -145,36 +125,21 @@ pub(crate) fn post_pod(req: Json<Request>, db: State<'_, Arc<RwLock<MemDatabase>
         });
     }
 
-    match db.write() {
-        Ok(mut db) => {
-            for (_, pod) in db.get_slice_by_ns_pod(req.0.namespace, req.0.pod).iter() {
-                let mut pod = pod.to_owned();
-                pod.upload = req.0.upload;
-                pod.filter = req.0.filter.clone();
-                pod.output = req.0.output.clone();
-                db.apply(&pod);
-            }
-            json!({"status":"ok"})
-        }
-        Err(e) => {
-            json!({
-            "status":"error",
-            "reason":format!("DB Lock Failure error {}",e)
-            })
-        }
+    for (_, pod) in db.get_slice_by_ns_pod(req.0.namespace, req.0.pod).iter() {
+        let mut pod = pod.to_owned();
+        pod.upload = req.0.upload;
+        pod.filter = req.0.filter.clone();
+        pod.output = req.0.output.clone();
+        let mut db = db.clone();
+        db.apply(&pod);
     }
+
+    json!({"status":"ok"})
 }
 
 #[get("/pod")]
-pub(crate) fn query_pod(db: State<'_, Arc<RwLock<MemDatabase>>>) -> JsonValue {
-    match db.read() {
-        Ok(_db) => {
-            json!({"status":"ok","reason":format!("{:?}",_db.all().to_json())})
-        }
-        Err(e) => {
-            json!({"status":"error","reason":format!("{}",e)})
-        }
-    }
+pub(crate) fn query_pod(db: State<'_, AMemDatabase>) -> JsonValue {
+    json!({"status":"ok","reason":format!("{:?}",db.all_to_json())})
 }
 
 #[catch(404)]

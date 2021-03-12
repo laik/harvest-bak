@@ -1,15 +1,13 @@
 #![feature(seek_stream_len)]
-#[macro_use]
 extern crate crossbeam_channel;
 use crossbeam_channel::{unbounded as async_channel, Sender};
-use db::{MemDatabase, Pod};
+use db::{AMemDatabase, Pod};
 use log::{error as err, warn};
 use output::OTS;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::sync::{Arc, RwLock};
 use threadpool::ThreadPool;
 
 pub enum SendFileEvent {
@@ -20,15 +18,15 @@ pub enum SendFileEvent {
 pub struct FileReaderWriter {
     threadpool: ThreadPool,
     handles: HashMap<String, Sender<SendFileEvent>>,
-    database: Arc<RwLock<MemDatabase>>,
+    amdb: AMemDatabase,
 }
 
 impl FileReaderWriter {
-    pub fn new(database: Arc<RwLock<MemDatabase>>, num_workers: usize) -> Self {
+    pub fn new(amdb: AMemDatabase, num_workers: usize) -> Self {
         Self {
             threadpool: ThreadPool::new(num_workers),
             handles: HashMap::new(),
-            database,
+            amdb,
         }
     }
 
@@ -54,7 +52,7 @@ impl FileReaderWriter {
 
     fn open(&mut self, pod: Pod) {
         let thread_path = pod.uuid.clone();
-        let database = self.database.clone();
+        let mut amdb = self.amdb.clone();
 
         let (tx, rx) = async_channel::<SendFileEvent>();
         let mut offset = pod.offset;
@@ -86,6 +84,8 @@ impl FileReaderWriter {
             if offset >= file_size as i64 {
                 break;
             }
+
+            amdb.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
         }
 
         let thread_pod = pod.clone();
@@ -109,12 +109,7 @@ impl FileReaderWriter {
                 )
             }
 
-            if let Ok(mut database) = database.try_write() {
-                database.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
-            } else {
-                break;
-            }
-
+            amdb.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
             bf.clear();
         });
         self.handles.insert(pod.uuid, tx);
@@ -128,27 +123,18 @@ impl FileReaderWriter {
     }
 
     pub fn write_event(&mut self, path: String) {
-        let mut pod = None;
         if !self.handles.contains_key(&path) {
-            match self.database.read() {
-                Ok(db) => {
-                    match db.get(path.clone()) {
-                        Some(it) => {
-                            if !it.upload {
-                                return;
-                            }
-                            pod = Some(it.clone());
-                        }
-                        None => {
-                            return;
-                        }
-                    };
+            match self.amdb.get(&*path) {
+                Some(it) => {
+                    if !it.upload {
+                        return;
+                    }
+                    self.open(it);
                 }
-                Err(e) => {
-                    err!("frw write event read db error {:?}", e)
+                None => {
+                    return;
                 }
-            }
-            self.open(pod.unwrap());
+            };
         }
 
         let handle = match self.handles.get(&path) {
@@ -174,7 +160,7 @@ fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
             "nodeId":pod.pod_name,
             "container":pod.container_name,
             "serviceName":pod.pod_name,
-            "ips":["172.0.0.1"],
+            "ips":pod.ips,
             "version":"v1.0.0"
             },
         "message":message}
@@ -185,11 +171,11 @@ fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::FileReaderWriter;
-    use db::{new_arc_database, MemDatabase, Pod};
+    use db::{AMemDatabase, Pod};
 
     #[test]
     fn it_works() {
-        let mut input = FileReaderWriter::new(new_arc_database(MemDatabase::default()), 10);
+        let mut input = FileReaderWriter::new(AMemDatabase::new(), 10);
         input.open_event(Pod::default());
     }
 }

@@ -16,6 +16,5 @@ path = "../event"
 strum = { version = "0.20", features = ["derive"] }
 serde = "1.0.123"
 serde_json = "1.0.62"
-
-[dependencies.spin]
-version = '0.7.1'
+lazy_static = "1.4.0"
+crossbeam-channel = "0.5.0"

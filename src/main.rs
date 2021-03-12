@@ -23,10 +23,10 @@ fn main() -> Result<()> {
     // println!("{:?}", opt);
 
     Harvest::new(
-        "default".to_owned(),
-        "/Users/dxp/workspace/go/src/github.com/laik/harvest/tmp".to_owned(),
-        "http://localhost:9999/".to_owned(),
-        "node1".to_owned(),
+        "default".into(),
+        "/Users/dxp/workspace/go/src/github.com/laik/harvest/tmp".into(),
+        "http://localhost:9999/".into(),
+        "node1".into(),
     )
     .start()
 }
