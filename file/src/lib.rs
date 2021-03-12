@@ -1,4 +1,7 @@
 #![feature(seek_stream_len)]
+#[macro_use]
+extern crate crossbeam_channel;
+use crossbeam_channel::{unbounded as async_channel, Sender};
 use db::{MemDatabase, Pod};
 use log::{error as err, warn};
 use output::OTS;
@@ -6,10 +9,8 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, RwLock};
-use std::thread;
-use std::thread::JoinHandle;
+use threadpool::ThreadPool;
 
 pub enum SendFileEvent {
     Close,
@@ -17,13 +18,15 @@ pub enum SendFileEvent {
 }
 
 pub struct FileReaderWriter {
-    handles: HashMap<String, (SyncSender<SendFileEvent>, JoinHandle<()>)>,
+    threadpool: ThreadPool,
+    handles: HashMap<String, Sender<SendFileEvent>>,
     database: Arc<RwLock<MemDatabase>>,
 }
 
 impl FileReaderWriter {
-    pub fn new(database: Arc<RwLock<MemDatabase>>) -> Self {
+    pub fn new(database: Arc<RwLock<MemDatabase>>, num_workers: usize) -> Self {
         Self {
+            threadpool: ThreadPool::new(num_workers),
             handles: HashMap::new(),
             database,
         }
@@ -37,14 +40,13 @@ impl FileReaderWriter {
     }
 
     pub fn close_event(&mut self, path: String) {
-        if let Some((tx, jh)) = self.handles.get(&path) {
+        if let Some(tx) = self.handles.get(&path) {
             if let Err(e) = tx.send(SendFileEvent::Close) {
                 err!(
                     "frw send close event to path FileReaderWriter {:?} error: {:?}",
                     &path,
                     e
                 );
-                let mut _jh = &*jh;
             }
             self.handles.remove(&path);
         };
@@ -54,7 +56,7 @@ impl FileReaderWriter {
         let thread_path = pod.uuid.clone();
         let database = self.database.clone();
 
-        let (tx, rx) = sync_channel::<SendFileEvent>(1);
+        let (tx, rx) = async_channel::<SendFileEvent>();
         let mut offset = pod.offset;
 
         let mut file = match File::open(thread_path.clone()) {
@@ -87,32 +89,35 @@ impl FileReaderWriter {
         }
 
         let thread_pod = pod.clone();
-        let jh = thread::spawn(move || loop {
-            for item in rx.recv() {
-                match item {
+        self.threadpool.execute(move || loop {
+            match rx.recv() {
+                Ok(item) => match item {
                     SendFileEvent::Close => {
                         break;
                     }
                     _ => {}
+                },
+                Err(e) => {
+                    err!("{}", e)
                 }
-                let incr_offset = br.read_line(&mut bf).unwrap();
-                if let Ok(mut ot) = outputs.lock() {
-                    ot.output(
-                        thread_pod.output.clone(),
-                        &encode_message(&thread_pod, bf.as_str()),
-                    )
-                }
-
-                if let Ok(mut database) = database.try_write() {
-                    database.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
-                } else {
-                    break;
-                }
-
-                bf.clear();
             }
+            let incr_offset = br.read_line(&mut bf).unwrap();
+            if let Ok(mut ot) = outputs.lock() {
+                ot.output(
+                    thread_pod.output.clone(),
+                    &encode_message(&thread_pod, bf.as_str()),
+                )
+            }
+
+            if let Ok(mut database) = database.try_write() {
+                database.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
+            } else {
+                break;
+            }
+
+            bf.clear();
         });
-        self.handles.insert(pod.uuid, (tx, jh));
+        self.handles.insert(pod.uuid, tx);
     }
 
     pub fn open_event(&mut self, pod: Pod) {
@@ -154,7 +159,7 @@ impl FileReaderWriter {
             }
         };
 
-        if let Err(e) = handle.0.send(SendFileEvent::Other) {
+        if let Err(e) = handle.send(SendFileEvent::Other) {
             err!("frw send write event error: {}, path: {}", e, path)
         }
     }
@@ -184,7 +189,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let mut input = FileReaderWriter::new(new_arc_database(MemDatabase::default()));
+        let mut input = FileReaderWriter::new(new_arc_database(MemDatabase::default()), 10);
         input.open_event(Pod::default());
     }
 }

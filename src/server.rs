@@ -25,7 +25,7 @@ impl Harvest {
     }
 
     pub fn start(&mut self) -> Result<()> {
-        let frw = Arc::new(Mutex::new(FileReaderWriter::new(self.database.clone())));
+        let frw = Arc::new(Mutex::new(FileReaderWriter::new(self.database.clone(), 8)));
         // registry db event handle
         match self.database.write() {
             Ok(mut rwdb) => {

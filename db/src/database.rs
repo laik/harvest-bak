@@ -89,15 +89,15 @@ impl Pod {
 impl Default for Pod {
     fn default() -> Pod {
         Pod {
-            uuid: "".to_owned(),
+            uuid: "".into(),
             offset: 0,
-            namespace: "".to_owned(),
-            pod_name: "".to_owned(),
-            container_name: "".to_owned(),
+            namespace: "".into(),
+            pod_name: "".into(),
+            container_name: "".into(),
             upload: false,
             state: State::Running,
-            filter: "".to_owned(),
-            output: "".to_owned(),
+            filter: "".into(),
+            output: "counter_output".into(),
         }
     }
 }

@@ -6,12 +6,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 pub use OUTPUTS as OTS;
 
 pub static OUTPUTS: Lazy<Arc<Mutex<Outputs>>> = Lazy::new(|| {
     let outputs = Arc::new(Mutex::new(Outputs::new()));
     if let Ok(mut ots) = outputs.lock() {
-        ots.registry_output("fake_output".to_owned(), Output::new(FakeOutput));
+        ots.registry_output("fake_output".into(), Output::new(FakeOutput));
+        ots.registry_output(
+            "counter_output".into(),
+            Output::new(Counter(AtomicUsize::new(0))),
+        );
     }
     outputs
 });
@@ -105,6 +111,17 @@ pub struct FakeOutput;
 impl IOutput for FakeOutput {
     fn write(&mut self, item: Item) -> Result<()> {
         println!("FakeOutput content: {:?}", item.string());
+        Ok(())
+    }
+}
+
+pub struct Counter(AtomicUsize);
+impl IOutput for Counter {
+    fn write(&mut self, item: Item) -> Result<()> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        if self.0.load(Ordering::Relaxed) as i64 % 10000 == 0 {
+            println!("Kafka counter {:?}", self.0.load(Ordering::Relaxed));
+        }
         Ok(())
     }
 }
