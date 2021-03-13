@@ -1,27 +1,21 @@
 use super::{rules_json, set_rule, Rule};
 use common::Result;
-use db::AMemDatabase;
 use log::{error as err, info};
 use rocket::State;
 use rocket::{get, post};
 use rocket_contrib::json::{Json, JsonValue};
 use serde::{Deserialize, Serialize};
 use sse_client::EventSource;
-use std::{
-    sync::{Arc, RwLock},
-    thread::{self, JoinHandle},
-};
+use std::thread::{self, JoinHandle};
 
 const RUN: &'static str = "run";
 const STOP: &'static str = "stop";
 
-pub struct ApiClient {
-    amdb: AMemDatabase,
-}
+pub struct ApiClient;
 
 impl ApiClient {
-    pub fn new(memdb: AMemDatabase) -> Self {
-        Self { amdb: memdb }
+    pub fn new() -> Self {
+        Self {}
     }
 
     pub(crate) fn watch(&mut self, addr: &str, node_name: &str) -> Result<JoinHandle<()>> {
@@ -34,8 +28,7 @@ impl ApiClient {
         };
 
         let node_name = node_name.to_owned();
-        // let mut amdb = self.amdb.clone();
-        let jh = thread::spawn(move || {
+        let jh = thread::Builder::new().name("ApiClient Watch".to_string()).spawn(move || {
             info!("🚀 start watch to api server");
             for event in event_sources.receiver().iter() {
                 match serde_json::from_str::<ApiServerRequest>(&event.data) {
@@ -55,10 +48,10 @@ impl ApiClient {
                                     },
                                 );
 
-                                // 导致死锁！！！！
-                                // amdb.start_upload_pod(request.ns.into(), pod.pod.into());
+                                // TODO 导致死锁！！！！
+                                db::pod_upload_start(request.ns, pod.pod);
                             } else if request.op == STOP {
-                                // amdb.stop_upload_pod(request.ns.into(), pod.pod.into());
+                                db::pod_upload_stop(request.ns, pod.pod.into());
                             } else {
                                 info!("api server event source send unknow event {:?}", request)
                             }
@@ -70,7 +63,7 @@ impl ApiClient {
                 }
             }
         });
-        Ok(jh)
+        Ok(jh.unwrap())
     }
 }
 #[derive(Serialize, Deserialize, Debug)]
@@ -117,7 +110,7 @@ pub(crate) fn query_rules() -> JsonValue {
 
 // /pod/collect list ns.pod start collect to output
 #[post("/pod", format = "json", data = "<req>")]
-pub(crate) fn post_pod(req: Json<Request>, db: State<'_, AMemDatabase>) -> JsonValue {
+pub(crate) fn post_pod(req: Json<Request>) -> JsonValue {
     if req.0.namespace == "" || req.0.pod == "" {
         return json!({
             "status": "error",
@@ -125,21 +118,20 @@ pub(crate) fn post_pod(req: Json<Request>, db: State<'_, AMemDatabase>) -> JsonV
         });
     }
 
-    for (_, pod) in db.get_slice_by_ns_pod(req.0.namespace, req.0.pod).iter() {
+    for (_, pod) in db::get_slice_with_ns_pod(&req.0.namespace, &req.0.pod).iter() {
         let mut pod = pod.to_owned();
         pod.upload = req.0.upload;
         pod.filter = req.0.filter.clone();
         pod.output = req.0.output.clone();
-        let mut db = db.clone();
-        db.apply(&pod);
+        db::apply(&pod);
     }
 
     json!({"status":"ok"})
 }
 
 #[get("/pod")]
-pub(crate) fn query_pod(db: State<'_, AMemDatabase>) -> JsonValue {
-    json!({"status":"ok","reason":format!("{:?}",db.all_to_json())})
+pub(crate) fn query_pod() -> JsonValue {
+    json!(db::all_to_json())
 }
 
 #[catch(404)]

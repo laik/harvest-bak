@@ -1,7 +1,7 @@
 #![feature(seek_stream_len)]
 extern crate crossbeam_channel;
 use crossbeam_channel::{unbounded as async_channel, Sender};
-use db::{AMemDatabase, Pod};
+use db::Pod;
 use log::{error as err, warn};
 use output::OTS;
 use serde_json::json;
@@ -18,27 +18,18 @@ pub enum SendFileEvent {
 pub struct FileReaderWriter {
     threadpool: ThreadPool,
     handles: HashMap<String, Sender<SendFileEvent>>,
-    amdb: AMemDatabase,
 }
 
 impl FileReaderWriter {
-    pub fn new(amdb: AMemDatabase, num_workers: usize) -> Self {
+    pub fn new(num_workers: usize) -> Self {
         Self {
-            threadpool: ThreadPool::new(num_workers),
+            threadpool: ThreadPool::with_name("FileReaderWriter".into(), num_workers),
             handles: HashMap::new(),
-            amdb,
         }
     }
 
-    pub fn has(&self, path: &str) -> bool {
-        if let Some(_) = self.handles.get(path) {
-            return true;
-        }
-        false
-    }
-
-    pub fn close_event(&mut self, path: String) {
-        if let Some(tx) = self.handles.get(&path) {
+    pub fn close_event(&mut self, path: &str) {
+        if let Some(tx) = self.handles.get(path) {
             if let Err(e) = tx.send(SendFileEvent::Close) {
                 err!(
                     "frw send close event to path FileReaderWriter {:?} error: {:?}",
@@ -46,14 +37,13 @@ impl FileReaderWriter {
                     e
                 );
             }
-            self.handles.remove(&path);
+            self.handles.remove(path);
+            db::delete(path);
         };
     }
 
-    fn open(&mut self, pod: Pod) {
+    fn open(&mut self, pod: &Pod) {
         let thread_path = pod.uuid.clone();
-        let mut amdb = self.amdb.clone();
-
         let (tx, rx) = async_channel::<SendFileEvent>();
         let mut offset = pod.offset;
 
@@ -85,7 +75,7 @@ impl FileReaderWriter {
                 break;
             }
 
-            amdb.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
+            db::incr_offset(&thread_path, incr_offset as i64);
         }
 
         let thread_pod = pod.clone();
@@ -109,23 +99,24 @@ impl FileReaderWriter {
                 )
             }
 
-            amdb.incr_offset_by_uuid(thread_path.clone(), incr_offset as i64);
+            db::incr_offset(&thread_path, incr_offset as i64);
             bf.clear();
         });
-        self.handles.insert(pod.uuid, tx);
+        self.handles.insert(pod.uuid.to_string(), tx);
     }
 
     pub fn open_event(&mut self, pod: Pod) {
         if self.handles.contains_key(&pod.uuid) {
             return;
         }
-        self.open(pod);
+        self.open(&pod);
+        db::apply(&pod)
     }
 
-    pub fn write_event(&mut self, path: String) {
-        if !self.handles.contains_key(&path) {
-            match self.amdb.get(&*path) {
-                Some(it) => {
+    pub fn write_event(&mut self, path: &str) {
+        if !self.handles.contains_key(path) {
+            match db::get(&*path) {
+                Some(ref it) => {
                     if !it.upload {
                         return;
                     }
@@ -137,7 +128,7 @@ impl FileReaderWriter {
             };
         }
 
-        let handle = match self.handles.get(&path) {
+        let handle = match self.handles.get(path) {
             Some(it) => it,
             _ => {
                 warn!("frw not found handle {}", path);
@@ -171,11 +162,11 @@ fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::FileReaderWriter;
-    use db::{AMemDatabase, Pod};
+    use db::Pod;
 
     #[test]
     fn it_works() {
-        let mut input = FileReaderWriter::new(AMemDatabase::new(), 10);
+        let mut input = FileReaderWriter::new(10);
         input.open_event(Pod::default());
     }
 }

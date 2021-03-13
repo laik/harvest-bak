@@ -1,9 +1,8 @@
 use common::Result;
-use db::{AMemDatabase, Pod};
-use event::{obj::Listener, Dispatch};
+use db::Pod;
+use event::{Dispatch, Listener};
 use notify::{raw_watcher, RawEvent, RecursiveMode, Watcher};
-use std::sync::RwLock;
-use std::sync::{mpsc::channel, Arc};
+use std::sync::mpsc::channel;
 use strum::AsRefStr;
 use walkdir::WalkDir;
 
@@ -18,7 +17,7 @@ pub enum PathEvent {
 }
 
 pub trait GetPathEventInfo {
-    fn get(&self) -> Option<&PathEventInfo>;
+    fn get(&self) -> &PathEventInfo;
 }
 
 pub trait GetDebug {
@@ -34,8 +33,8 @@ pub struct PathEventInfo {
 }
 
 impl GetPathEventInfo for PathEventInfo {
-    fn get(&self) -> Option<&PathEventInfo> {
-        Some(self)
+    fn get(&self) -> &PathEventInfo {
+        self
     }
 }
 
@@ -59,14 +58,6 @@ impl PathEventInfo {
 
 unsafe impl Sync for PathEventInfo {}
 unsafe impl Send for PathEventInfo {}
-
-pub type ScannerRecvArgument = (PathEventInfo, AMemDatabase);
-
-impl GetPathEventInfo for ScannerRecvArgument {
-    fn get(&self) -> Option<&PathEventInfo> {
-        Some(&self.0)
-    }
-}
 
 pub struct AutoScanner {
     namespace: String,
@@ -280,11 +271,11 @@ impl AutoScanner {
 #[cfg(test)]
 mod tests {
     use crate::{AutoScanner, GetDebug, PathEvent};
-    use event::obj::Listener;
+    use event::Listener;
 
     #[test]
     fn it_works() {
-        let mut auto_scanner = AutoScanner::new("".to_owned(), ".".to_owned());
+        let mut auto_scanner = AutoScanner::new("".into(), ".".into());
 
         struct ListenerImpl;
         impl<T> Listener<T> for ListenerImpl
@@ -295,7 +286,6 @@ mod tests {
                 let _ = t.get_debug();
             }
         }
-
         auto_scanner.append_close_event_handle(ListenerImpl);
     }
 

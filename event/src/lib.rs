@@ -1,25 +1,30 @@
-pub mod obj;
-pub use obj::{Dispatch, Listener};
-
 use std::collections::HashMap;
 
-pub struct EventHandler<T: Clone> {
-    listeners: HashMap<String, Vec<Box<dyn Fn(T) + Send + Sync>>>,
-}
-
-impl<T> EventHandler<T>
+pub trait Listener<T>
 where
     T: Clone,
 {
-    pub fn new() -> EventHandler<T> {
+    fn handle(&self, t: T);
+}
+
+pub type BoxListener<T> = Box<dyn Listener<T> + Send + Sync>;
+
+pub type VecBoxListener<T> = Vec<BoxListener<T>>;
+
+pub struct Dispatch<T: Clone> {
+    listeners: HashMap<String, VecBoxListener<T>>,
+}
+
+impl<T: Clone> Dispatch<T> {
+    pub fn new() -> Self {
         Self {
             listeners: HashMap::new(),
         }
     }
 
-    pub fn registry<F>(&mut self, name: String, listener: F)
+    pub fn registry<L>(&mut self, name: String, listener: L)
     where
-        F: Fn(T) + Send + Sync + 'static,
+        L: Listener<T> + Send + Sync + 'static,
     {
         let listener = Box::new(listener);
         if self.listeners.contains_key(&name) {
@@ -29,10 +34,10 @@ where
         }
     }
 
-    pub fn event(&self, name: String, data: T) {
+    pub fn dispatch(&mut self, name: String, d: T) {
         if self.listeners.contains_key(&name) {
             for listener in self.listeners.get(&name).unwrap().iter() {
-                listener(data.clone())
+                listener.handle(d.clone())
             }
         }
     }
@@ -40,28 +45,51 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::EventHandler;
+    use crate::{Dispatch, Listener};
+    use std::{
+        sync::mpsc::{sync_channel, SyncSender},
+        thread,
+    };
+
+    struct ListenerImpl<T> {
+        sender: SyncSender<T>,
+    }
+
+    impl<T> ListenerImpl<T> {
+        pub fn new(sender: SyncSender<T>) -> Self {
+            Self { sender }
+        }
+    }
+
+    impl<T> Listener<T> for ListenerImpl<T>
+    where
+        T: Clone,
+    {
+        fn handle(&self, t: T) {
+            self.sender.send(t).unwrap()
+        }
+    }
 
     #[test]
     fn it_works() {
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let mut dispatch = Dispatch::<String>::new();
 
+        let (tx, rx) = sync_channel::<String>(1);
         let tx1 = tx.clone();
+        let li1 = ListenerImpl::new(tx1);
+        let tx2 = tx.clone();
+        let li2 = ListenerImpl::new(tx2);
 
-        let mut event_handler = EventHandler::<String>::new();
+        dispatch.registry("pod_name_update".to_owned(), li1);
+        dispatch.registry("pod_name_update".to_owned(), li2);
 
-        event_handler.registry("pod_name_update".to_owned(), move |s: String| {
-            tx.send(s).unwrap();
+        let join_handle = thread::spawn(move || {
+            dispatch.dispatch("pod_name_update".to_owned(), "abc".to_owned())
         });
 
-        event_handler.registry("pod_name_update2".to_owned(), move |s: String| {
-            tx1.send(s).unwrap();
-        });
-
-        event_handler.event("pod_name_update".to_owned(), "abc".to_owned());
-        assert_eq!(rx.recv().unwrap(), "abc");
-
-        event_handler.event("pod_name_update2".to_owned(), "cde".to_owned());
-        assert_eq!(rx.recv().unwrap(), "cde");
+        for item in rx.recv() {
+            assert_eq!(item, "abc".to_owned());
+        }
+        join_handle.join().unwrap();
     }
 }

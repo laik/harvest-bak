@@ -1,241 +1,133 @@
 #[warn(mutable_borrow_reservation_conflict)]
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate lazy_static;
 mod database;
 
-use std::sync::{Arc, RwLock};
+mod pod;
+use database::Message;
+pub use pod::{GetPod, Pod, PodList, PodListMarshaller, State};
 
+pub use database::Event;
 pub(crate) use database::MemDatabase;
-pub use database::{Event, GetPod, Pod, State};
-use event::Listener;
 
 lazy_static! {
-    pub static ref AMDB: AMemDatabase = {
-        let m = AMemDatabase::new();
+    static ref MEM_DB: MemDatabase = {
+        let m = MemDatabase::new();
         m
     };
 }
 
-#[derive(Clone)]
-pub struct AMemDatabase(Arc<RwLock<MemDatabase>>);
+pub fn incr_offset(uuid: &str, offset: i64) {
+    MEM_DB
+        .tx
+        .send(Message {
+            event: Event::IncrOffset,
+            pod: Pod {
+                uuid: uuid.to_string(),
+                incr_offset: offset,
+                ..Default::default()
+            },
+        })
+        .unwrap()
+}
 
-impl AMemDatabase {
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(MemDatabase::new())))
-    }
+pub fn apply(pod: &Pod) {
+    MEM_DB
+        .tx
+        .send(Message {
+            event: Event::Apply,
+            pod: pod.clone(),
+        })
+        .unwrap();
+}
 
-    pub fn append_add_event<L>(&mut self, l: L)
-    where
-        L: Listener<Pod> + Send + Sync + 'static,
-    {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.append_add_event(l),
-            Err(e) => {
-                eprintln!("{:?}", e)
-            }
-        }
-    }
+pub fn delete(uuid: &str) {
+    MEM_DB
+        .tx
+        .send(Message {
+            event: Event::Delete,
+            pod: Pod {
+                uuid: uuid.to_string(),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+}
 
-    pub fn get(&self, uuid: &str) -> Option<Pod> {
-        if let Ok(mdb) = self.0.read() {
-            if let Some(pod) = mdb.pods.get(uuid) {
-                return Some(pod.to_owned());
-            }
-        }
-        None
-    }
+pub fn all_to_json() -> String {
+    PodListMarshaller(
+        MEM_DB
+            .pods
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(_, v)| v.clone())
+            .collect::<Vec<Pod>>(),
+    )
+    .to_json()
+}
 
-    pub fn append_delete_event<L>(&mut self, l: L)
-    where
-        L: Listener<Pod> + Send + Sync + 'static,
-    {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.append_delete_event(l),
-            Err(e) => {
-                eprintln!("{:?}", e)
-            }
-        }
-    }
+pub fn close() {
+    MEM_DB
+        .tx
+        .send(Message {
+            event: Event::Close,
+            pod: Pod {
+                ..Default::default()
+            },
+        })
+        .unwrap();
+}
 
-    pub fn append_update_event<L>(&mut self, l: L)
-    where
-        L: Listener<Pod> + Send + Sync + 'static,
-    {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.append_update_event(l),
-            Err(e) => {
-                eprintln!("{:?}", e)
-            }
-        }
-    }
-
-    pub fn all_to_json(&self) -> String {
-        match self.0.read() {
-            Ok(mdb) => mdb.all().to_json(),
-            Err(e) => {
-                eprintln!("{:?}", e);
-                "".into()
-            }
-        }
-    }
-
-    pub fn get_slice_by_ns_pod(&self, ns: String, pod: String) -> Vec<(String, Pod)> {
-        match self.0.read() {
-            Ok(mdb) => mdb.get_slice_by_ns_pod(ns, pod),
-            Err(e) => {
-                eprintln!("{:?}", e);
-                vec![]
-            }
-        }
-    }
-
-    pub fn apply(&mut self, pod: &Pod) {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.apply(pod),
-            Err(e) => {
-                eprintln!("{:?}", e);
-            }
-        }
-    }
-
-    pub fn delete_by_ns_pod(&mut self, ns: String, pod_name: String) {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.delete_by_ns_pod(ns, pod_name),
-            Err(e) => {
-                eprintln!("{:?}", e);
-            }
-        }
-    }
-
-    pub fn delete(&mut self, uuid: String) {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.delete(uuid),
-            Err(e) => {
-                eprintln!("{:?}", e);
-            }
-        }
-    }
-
-    pub fn stop_upload_pod(&mut self, ns: String, pod_name: String) {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.stop_upload_pod(ns, pod_name),
-            Err(e) => {
-                eprintln!("{:?}", e);
-            }
-        }
-    }
-
-    pub fn start_upload_pod(&mut self, ns: String, pod_name: String) {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.start_upload_pod(ns, pod_name),
-            Err(e) => {
-                eprintln!("{:?}", e);
-            }
-        }
-    }
-
-    pub fn incr_offset_by_uuid(&mut self, uuid: String, incr_size: i64) {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.incr_offset_by_uuid(uuid, incr_size),
-            Err(e) => {
-                eprintln!("{:?}", e)
-            }
-        }
-    }
-
-    pub fn put(&mut self, pod: Pod) {
-        match self.0.write() {
-            Ok(mut mdb) => mdb.put(pod),
-            Err(e) => {
-                eprintln!("{:?}", e)
-            }
-        }
+pub fn get(uuid: &str) -> Option<Pod> {
+    match MEM_DB.pods.read() {
+        Ok(pods) => match pods.get(uuid) {
+            Some(pod) => Some(pod.clone()),
+            None => None,
+        },
+        Err(_) => None,
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crossbeam_channel::unbounded;
-    use std::vec;
-    use std::{thread, time};
+pub fn get_slice_with_ns_pod(ns: &str, pod: &str) -> Vec<(String, Pod)> {
+    MEM_DB
+        .pods
+        .read()
+        .unwrap()
+        .iter()
+        .filter(|(_, v)| v.namespace == ns && v.pod_name == pod)
+        .map(|(uuid, pod)| (uuid.clone(), pod.clone()))
+        .collect::<Vec<(String, Pod)>>()
+}
 
-    #[test]
-    fn thread_safe() {
-        let mut amdb = AMemDatabase::new();
-        amdb.put(Pod {
-            pod_name: "a".into(),
-            ..Default::default()
-        });
-        amdb.put(Pod {
-            pod_name: "b".into(),
-            ..Default::default()
-        });
-        amdb.put(Pod {
-            pod_name: "c".into(),
-            ..Default::default()
-        });
-        let (t, r) = unbounded::<()>();
+pub fn delete_with_ns_pod(pod_ns: &str, pod_name: &str) {
+    MEM_DB
+        .tx
+        .send(Message {
+            event: Event::Delete,
+            pod: Pod {
+                namespace: pod_ns.to_string(),
+                pod_name: pod_name.to_string(),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+}
 
-        let mut joins = vec![];
-        let mut x = amdb.clone();
-        let r1 = r.clone();
-        let r2 = r.clone();
-        let r3 = r.clone();
-        let r4 = r.clone();
+pub fn pod_upload_stop(ns: &str, pod_name: &str) {
+    let res = get_slice_with_ns_pod(ns, pod_name);
+    for (_, mut pod) in res {
+        pod.unupload();
+        pod.set_stopped();
+        apply(&pod);
+    }
+}
 
-        joins.push(thread::spawn(move || {
-            let mut x1 = x.clone();
-            thread::spawn(move || loop {
-                match r1.recv() {
-                    Ok(_) => {
-                        return;
-                    }
-                    Err(e) => {}
-                };
-                x1.incr_offset_by_uuid("a".into(), 1);
-            });
-            loop {
-                match r2.recv() {
-                    Ok(_) => {
-                        return;
-                    }
-                    Err(e) => {}
-                };
-                x.incr_offset_by_uuid("a".into(), 1);
-            }
-        }));
-        let mut x = amdb.clone();
-        joins.push(thread::spawn(move || loop {
-            match r3.recv() {
-                Ok(_) => {
-                    return;
-                }
-                Err(e) => {}
-            };
-            x.incr_offset_by_uuid("b".into(), 1);
-        }));
-
-        let mut x = amdb.clone();
-        joins.push(thread::spawn(move || loop {
-            match r4.recv() {
-                Ok(_) => {
-                    return;
-                }
-                Err(e) => {}
-            };
-            x.incr_offset_by_uuid("c".into(), 1);
-        }));
-
-        let ten = time::Duration::from_secs(2);
-        // let now = time::Instant::now();
-        thread::sleep(ten);
-
-        for _ in 0..4 {
-            t.send(()).unwrap();
-        }
-
-        for th in joins {
-            th.join().unwrap();
-        }
+pub fn pod_upload_start(ns: &str, pod_name: &str) {
+    let res = get_slice_with_ns_pod(ns, pod_name);
+    for (_, mut pod) in res {
+        pod.upload();
+        pod.set_running();
+        apply(&pod);
     }
 }

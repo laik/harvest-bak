@@ -1,5 +1,4 @@
 use super::*;
-use db::AMDB;
 use file::FileReaderWriter;
 use rocket::config::{Config, Environment};
 use rocket::routes;
@@ -25,24 +24,18 @@ impl Harvest {
     }
 
     pub fn start(&mut self) -> Result<()> {
-        let frw = Arc::new(Mutex::new(FileReaderWriter::new(AMDB.clone(), 1000)));
-        // registry db event handle
-        let mut amdb = AMDB.clone();
-        amdb.append_update_event(DBUpdateEvent(AMDB.clone(), frw.clone()));
-        amdb.append_delete_event(DBDeleteEvent(AMDB.clone(), frw.clone()));
-        amdb.append_add_event(DBAddEvent(AMDB.clone(), frw.clone()));
-
+        let frw = Arc::new(Mutex::new(FileReaderWriter::new(1000)));
         match self.scanner.write() {
             Ok(mut scan) => {
                 // registry scanner event handle
-                scan.append_close_event_handle(ScannerCloseEvent(AMDB.clone(), frw.clone()));
-                scan.append_open_event_handle(ScannerOpenEvent(AMDB.clone(), frw.clone()));
-                scan.append_write_event_handle(ScannerWriteEvent(AMDB.clone(), frw.clone()));
+                scan.append_close_event_handle(ScannerCloseEvent(frw.clone()));
+                scan.append_open_event_handle(ScannerOpenEvent(frw.clone()));
+                scan.append_write_event_handle(ScannerWriteEvent(frw.clone()));
             }
             _ => {}
         }
 
-        let mut api_client = ApiClient::new(AMDB.clone());
+        let mut api_client = ApiClient::new();
         let jh2 = match api_client.watch(&self.api_server_addr, &self.node_name) {
             Ok(it) => it,
             Err(e) => return Err(e),
@@ -58,7 +51,7 @@ impl Harvest {
                     }
 
                     for item in res.iter() {
-                        amdb.put(item.to_pod())
+                        db::apply(&item.to_pod())
                     }
                 }
                 apply_rules();
@@ -80,7 +73,7 @@ impl Harvest {
         rocket::custom(cfg)
             .mount("/", routes![post_pod, query_pod, query_rules])
             .register(catchers![not_found])
-            .manage(AMDB.clone())
+            // .manage(AMDB.clone())
             .launch();
 
         jh.join().unwrap();

@@ -8,26 +8,20 @@ extern crate rocket;
 extern crate lazy_static;
 
 mod api;
-mod event_listener;
+mod listener;
 mod server;
 
 pub use serde_json;
 
 pub(crate) use api::*;
 pub use common::Result;
-pub(crate) use event_listener::{
-    DBAddEvent, DBDeleteEvent, DBUpdateEvent, ScannerCloseEvent, ScannerOpenEvent,
-    ScannerWriteEvent,
-};
+pub(crate) use listener::{ScannerCloseEvent, ScannerOpenEvent, ScannerWriteEvent};
 pub use server::Harvest;
 
-use db::AMDB;
 use log::error as err;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 type RuleList = Vec<(String, Rule)>;
 
@@ -73,10 +67,10 @@ lazy_static! {
     };
 }
 
-pub(crate) fn set_rule(key: String, value: Rule) {
+pub(crate) fn set_rule(key: &str, value: Rule) {
     match GLOBAL_RULES.try_write() {
         Ok(mut db) => {
-            db.insert(key, value);
+            db.insert(key.to_string(), value);
         }
         Err(e) => {
             err!("{}", e);
@@ -97,26 +91,25 @@ pub(crate) fn rules_json() -> String {
 }
 
 pub(crate) fn apply_rules() {
-    let mut amdb = AMDB.clone();
     if let Ok(hm) = GLOBAL_RULES.read() {
         for (pod_name, rule) in hm.iter() {
             let mut result_pod_list = vec![];
-            for (_, mut v) in AMDB.get_slice_by_ns_pod(rule.ns.clone(), pod_name.clone()) {
+            for (_, mut v) in db::get_slice_with_ns_pod(&rule.ns, pod_name) {
                 if rule.upload {
                     v.upload();
                 }
                 result_pod_list.push(v.clone());
             }
             for p in result_pod_list {
-                amdb.apply(&p);
+                db::apply(&p);
             }
         }
     }
 }
 
-pub(crate) fn get_rule(key: String) -> Option<Rule> {
+pub(crate) fn get_rule(key: &str) -> Option<Rule> {
     match GLOBAL_RULES.read() {
-        Ok(db) => match db.get(&key) {
+        Ok(db) => match db.get(key) {
             Some(rule) => Some(rule.clone()),
             None => None,
         },
