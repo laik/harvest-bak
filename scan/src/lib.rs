@@ -1,6 +1,7 @@
 use common::Result;
 use db::Pod;
 use event::{Dispatch, Listener};
+use log::{error as err, info, warn};
 use notify::{raw_watcher, RawEvent, RecursiveMode, Watcher};
 use std::sync::mpsc::channel;
 use strum::AsRefStr;
@@ -48,9 +49,9 @@ impl PathEventInfo {
     pub fn to_pod(&self) -> Pod {
         Pod {
             uuid: self.path.clone(),
-            namespace: self.namespace.clone(),
-            pod_name: self.pod.clone(),
-            container_name: self.container.clone(),
+            ns: self.namespace.clone(),
+            pod: self.pod.clone(),
+            container: self.container.clone(),
             ..Default::default()
         }
     }
@@ -98,15 +99,15 @@ impl AutoScanner {
             .registry(PathEvent::NeedOpen.as_ref().to_owned(), l)
     }
 
-    fn dispatch_open_event(&mut self, pei: PathEventInfo) {
+    fn dispatch_open_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
             .dispatch(PathEvent::NeedOpen.as_ref().to_string(), pei)
     }
-    fn dispatch_write_event(&mut self, pei: PathEventInfo) {
+    fn dispatch_write_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
             .dispatch(PathEvent::NeedWrite.as_ref().to_string(), pei)
     }
-    fn dispatch_close_event(&mut self, pei: PathEventInfo) {
+    fn dispatch_close_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
             .dispatch(PathEvent::NeedClose.as_ref().to_string(), pei)
     }
@@ -125,7 +126,7 @@ impl AutoScanner {
     //  logfiles: [4.log,5.log]
     // }
     // /var/log/pods/default_mysql-apollo-slave-0_49d0b6e1-9980-4f7b-b1eb-3eab3e753b48/mysql/4.log
-    fn parse_path_to_pei(namespace: String, dir: String, path: String) -> Option<PathEventInfo> {
+    fn parse_path_to_pei(namespace: &str, dir: &str, path: &str) -> Option<PathEventInfo> {
         if !path.starts_with(&dir) || !path.ends_with(".log") {
             return None;
         }
@@ -150,31 +151,29 @@ impl AutoScanner {
             namespace: ns_pod_list[0].to_string(),
             pod: ns_pod_list[1].to_string(),
             container: container.to_owned(),
-            path: path.clone(),
+            path: path.to_string(),
         })
     }
 
     pub fn prepare_scan(&self) -> Result<Vec<PathEventInfo>> {
-        println!("🔧 harvest auto_scanner start prepare_scanner!!!");
+        info!("🔧 harvest auto_scanner start prepare_scanner!!!");
         let mut result = vec![];
         for entry in WalkDir::new(self.dir.clone()) {
             let entry = entry?;
             if !entry.path().is_file() {
                 continue;
             }
-            if let Some(pei) = Self::parse_path_to_pei(
-                self.namespace.clone(),
-                self.dir.clone(),
-                entry.path().to_str().unwrap().to_owned(),
-            ) {
+            if let Some(pei) =
+                Self::parse_path_to_pei(&self.namespace, &self.dir, entry.path().to_str().unwrap())
+            {
                 result.push(pei);
             }
         }
         Ok(result)
     }
 
-    pub fn watch_start(&mut self) -> Result<()> {
-        println!("🔧 harvest auto_scanner start");
+    pub fn directory_watch_start(&mut self) -> Result<()> {
+        info!("🔧 harvest auto_scanner start");
         // Create a channel to receive the events.
         let (tx, rx) = channel();
 
@@ -186,80 +185,66 @@ impl AutoScanner {
         // below will be monitored for changes.
         watcher.watch(&self.dir, RecursiveMode::Recursive)?;
 
-        loop {
-            match rx.recv() {
-                Ok(RawEvent {
-                    path: Some(path),
-                    op: Ok(op),
-                    cookie,
-                }) => {
-                    let path = path.to_str().unwrap().to_string();
+        while let Ok(RawEvent {
+            path: Some(path),
+            op: Ok(op),
+            cookie,
+        }) = rx.recv()
+        {
+            let path = path.to_str().unwrap();
+            info!("recv event {:?} path: {:?}", op, path);
 
-                    match op {
-                        notify::Op::CREATE => {
-                            match Self::parse_path_to_pei(
-                                self.namespace.to_owned(),
-                                self.dir.clone(),
-                                path.clone(),
-                            ) {
-                                Some(pei) => self.dispatch_open_event(pei),
-                                _ => {}
-                            }
-                        }
-                        notify::Op::WRITE => {
-                            match Self::parse_path_to_pei(
-                                self.namespace.to_owned(),
-                                self.dir.clone(),
-                                path.clone(),
-                            ) {
-                                Some(pei) => self.dispatch_write_event(pei),
-                                _ => {}
-                            }
-                        }
-                        notify::Op::REMOVE => {
-                            match Self::parse_path_to_pei(
-                                self.namespace.to_owned(),
-                                self.dir.clone(),
-                                path.clone(),
-                            ) {
-                                Some(pei) => self.dispatch_close_event(pei),
-                                _ => {}
-                            }
-                        }
+            match op {
+                notify::Op::CREATE => {
+                    match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
+                        Some(ref pei) => self.dispatch_open_event(pei),
                         _ => {
-                            if op == notify::Op::CREATE | notify::Op::WRITE {
-                                match Self::parse_path_to_pei(
-                                    self.namespace.to_owned(),
-                                    self.dir.clone(),
-                                    path.clone(),
-                                ) {
-                                    Some(pei) => self.dispatch_open_event(pei),
-                                    _ => {}
-                                }
-                                continue;
-                            } else if op == notify::Op::CLOSE_WRITE
-                                || op == notify::Op::CREATE | notify::Op::REMOVE | notify::Op::WRITE
-                                || op == notify::Op::CREATE | notify::Op::REMOVE
-                                || op == notify::Op::REMOVE | notify::Op::WRITE
-                            {
-                                match Self::parse_path_to_pei(
-                                    self.namespace.to_owned(),
-                                    self.dir.clone(),
-                                    path.clone(),
-                                ) {
-                                    Some(pei) => self.dispatch_close_event(pei),
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            println!("unhandled event {:?} {:?} ({:?})", op, path, cookie);
+                            warn!("notfiy op not handle event create");
                         }
                     }
                 }
-                Ok(event) => println!("scannner watch path: {:?} event: {:?}", &self.dir, event),
-                Err(e) => {
-                    println!("scannner watch path error: {:?}", e);
-                    break;
+                notify::Op::WRITE => {
+                    match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
+                        Some(ref pei) => self.dispatch_write_event(pei),
+                        _ => {
+                            warn!("notfiy op not handle event write");
+                        }
+                    }
+                }
+                notify::Op::REMOVE => {
+                    match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
+                        Some(ref pei) => self.dispatch_close_event(pei),
+                        _ => {
+                            warn!("notfiy op not handle event remove");
+                        }
+                    }
+                }
+                _ => {
+                    if op == notify::Op::CREATE | notify::Op::WRITE {
+                        match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
+                            Some(ref pei) => {
+                                self.dispatch_open_event(pei);
+                                self.dispatch_write_event(pei)
+                            }
+                            _ => {
+                                warn!("notfiy op not handle event create|write");
+                            }
+                        }
+                        continue;
+                    } else if op == notify::Op::CLOSE_WRITE
+                        || op == notify::Op::CREATE | notify::Op::REMOVE | notify::Op::WRITE
+                        || op == notify::Op::CREATE | notify::Op::REMOVE
+                        || op == notify::Op::REMOVE | notify::Op::WRITE
+                    {
+                        match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
+                            Some(ref pei) => self.dispatch_close_event(pei),
+                            _ => {
+                                warn!("notfiy op not handle event remove|all");
+                            }
+                        }
+                        continue;
+                    }
+                    info!("unhandled event {:?} {:?} ({:?})", op, path, cookie);
                 }
             }
         }

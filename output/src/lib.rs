@@ -43,8 +43,8 @@ impl Outputs {
         self.output_listener.insert(name, Box::new(t));
     }
 
-    pub fn output(&mut self, name: String, line: &str) {
-        if !self.output_listener.contains_key(&name) {
+    pub fn output(&mut self, name: &str, line: &str) {
+        if !self.output_listener.contains_key(name) {
             if line.len() == 0 {
                 return;
             }
@@ -53,7 +53,7 @@ impl Outputs {
             return;
         }
 
-        match self.output_listener.get_mut(&name) {
+        match self.output_listener.get_mut(name) {
             Some(o) => {
                 if let Err(e) = o.write(Item::from(line)) {
                     err!("{:?}", e);

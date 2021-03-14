@@ -1,24 +1,9 @@
 # harvest(WIP)
 
 
-1. server 监听通过RPC请求将数据写入本地db,然后启动收集日志任务，数据包括过滤，输出，收集的pod
-2. input 查找当前全名空间的日志文件，并生成元数据写入本地db
-3. parser 解析过滤数据规则
-4. output 输出
+pod info 
+    state:  ready running stopped
 
-
-server code
-
-    let server= Server::new(address);
-    server.run();
-
-
-input code
-1.实现目录的wacth,如果日志文件有变动，则自动添加进任务
-2.
-let input = Input::new(namespace,pod_name)-> Result<Vec<Row>>; --> namespace eg: kube-system coredns 0.log,1.log,2.log
-
-    input.collect_by_asc() 从小读到大?
 
 
 取pod状态的containerID

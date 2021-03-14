@@ -24,7 +24,7 @@ pub fn incr_offset(uuid: &str, offset: i64) {
             event: Event::IncrOffset,
             pod: Pod {
                 uuid: uuid.to_string(),
-                incr_offset: offset,
+                last_offset: offset,
                 ..Default::default()
             },
         })
@@ -95,7 +95,7 @@ pub fn get_slice_with_ns_pod(ns: &str, pod: &str) -> Vec<(String, Pod)> {
         .read()
         .unwrap()
         .iter()
-        .filter(|(_, v)| v.namespace == ns && v.pod_name == pod)
+        .filter(|(_, v)| v.ns == ns && v.pod == pod)
         .map(|(uuid, pod)| (uuid.clone(), pod.clone()))
         .collect::<Vec<(String, Pod)>>()
 }
@@ -106,8 +106,8 @@ pub fn delete_with_ns_pod(pod_ns: &str, pod_name: &str) {
         .send(Message {
             event: Event::Delete,
             pod: Pod {
-                namespace: pod_ns.to_string(),
-                pod_name: pod_name.to_string(),
+                ns: pod_ns.to_string(),
+                pod: pod_name.to_string(),
                 ..Default::default()
             },
         })
@@ -117,8 +117,8 @@ pub fn delete_with_ns_pod(pod_ns: &str, pod_name: &str) {
 pub fn pod_upload_stop(ns: &str, pod_name: &str) {
     let res = get_slice_with_ns_pod(ns, pod_name);
     for (_, mut pod) in res {
-        pod.unupload();
-        pod.set_stopped();
+        pod.un_upload();
+        pod.set_state_stop();
         apply(&pod);
     }
 }
@@ -127,7 +127,7 @@ pub fn pod_upload_start(ns: &str, pod_name: &str) {
     let res = get_slice_with_ns_pod(ns, pod_name);
     for (_, mut pod) in res {
         pod.upload();
-        pod.set_running();
+        pod.set_state_run();
         apply(&pod);
     }
 }

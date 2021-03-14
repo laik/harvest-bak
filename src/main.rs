@@ -28,5 +28,5 @@ fn main() -> Result<()> {
         "http://localhost:9999/".into(),
         "node1".into(),
     )
-    .start()
+    .start(1000)
 }

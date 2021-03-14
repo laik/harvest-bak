@@ -17,37 +17,54 @@ pub enum SendFileEvent {
 
 pub struct FileReaderWriter {
     threadpool: ThreadPool,
-    handles: HashMap<String, Sender<SendFileEvent>>,
+    file_handles: HashMap<String, Sender<SendFileEvent>>,
 }
 
 impl FileReaderWriter {
     pub fn new(num_workers: usize) -> Self {
         Self {
             threadpool: ThreadPool::with_name("FileReaderWriter".into(), num_workers),
-            handles: HashMap::new(),
+            file_handles: HashMap::new(),
         }
     }
 
-    pub fn close_event(&mut self, path: &str) {
-        if let Some(tx) = self.handles.get(path) {
+    pub fn close_event(&mut self, pod: &Pod) {
+        if let Some(tx) = self.file_handles.get(&pod.uuid) {
             if let Err(e) = tx.send(SendFileEvent::Close) {
                 err!(
                     "frw send close event to path FileReaderWriter {:?} error: {:?}",
-                    &path,
+                    &pod.uuid,
                     e
                 );
             }
-            self.handles.remove(path);
-            db::delete(path);
+            self.file_handles.remove(&pod.uuid);
         };
+
+        db::delete(&pod.uuid);
     }
 
-    fn open(&mut self, pod: &Pod) {
-        let thread_path = pod.uuid.clone();
-        let (tx, rx) = async_channel::<SendFileEvent>();
-        let mut offset = pod.offset;
+    pub fn open_event(&mut self, pod: &mut Pod) {
+        if self.file_handles.contains_key(&pod.uuid) {
+            return;
+        }
+        self._open(pod);
+    }
 
-        let mut file = match File::open(thread_path.clone()) {
+    pub fn write_event(&mut self, pod: &mut Pod) {
+        let handle = match self.file_handles.get(&pod.uuid) {
+            Some(it) => it,
+            _ => {
+                return;
+            }
+        };
+        if let Err(e) = handle.send(SendFileEvent::Other) {
+            err!("frw send write event error: {}, path: {}", e, &pod.uuid)
+        }
+    }
+
+    fn _open(&mut self, pod: &mut Pod) {
+        let mut offset = pod.offset;
+        let mut file = match File::open(&pod.uuid) {
             Ok(file) => file,
             Err(e) => {
                 err!("frw open file {:?} error: {:?}", pod.uuid, e);
@@ -65,94 +82,61 @@ impl FileReaderWriter {
         let outputs = OTS.clone();
 
         loop {
-            let incr_offset = br.read_line(&mut bf).unwrap();
+            let cur_size = br.read_line(&mut bf).unwrap();
             if let Ok(mut ot) = outputs.lock() {
-                ot.output(pod.output.clone(), &encode_message(&pod, bf.as_str()))
+                ot.output(&pod.output, &encode_message(&pod, bf.as_str()))
             }
-            offset += incr_offset as i64;
+            db::incr_offset(&pod.uuid, cur_size as i64);
             bf.clear();
+
+            offset += cur_size as i64;
             if offset >= file_size as i64 {
                 break;
             }
-
-            db::incr_offset(&thread_path, incr_offset as i64);
         }
 
         let thread_pod = pod.clone();
-        self.threadpool.execute(move || loop {
-            match rx.recv() {
-                Ok(item) => match item {
+        let (tx, rx) = async_channel::<SendFileEvent>();
+        self.threadpool.execute(move || {
+            while let Ok(evt) = rx.recv() {
+                match evt {
                     SendFileEvent::Close => {
                         break;
                     }
-                    _ => {}
-                },
-                Err(e) => {
-                    err!("{}", e)
-                }
-            }
-            let incr_offset = br.read_line(&mut bf).unwrap();
-            if let Ok(mut ot) = outputs.lock() {
-                ot.output(
-                    thread_pod.output.clone(),
-                    &encode_message(&thread_pod, bf.as_str()),
-                )
-            }
-
-            db::incr_offset(&thread_path, incr_offset as i64);
-            bf.clear();
-        });
-        self.handles.insert(pod.uuid.to_string(), tx);
-    }
-
-    pub fn open_event(&mut self, pod: Pod) {
-        if self.handles.contains_key(&pod.uuid) {
-            return;
-        }
-        self.open(&pod);
-        db::apply(&pod)
-    }
-
-    pub fn write_event(&mut self, path: &str) {
-        if !self.handles.contains_key(path) {
-            match db::get(&*path) {
-                Some(ref it) => {
-                    if !it.upload {
-                        return;
+                    _ => {
+                        let incr_offset = br.read_line(&mut bf).unwrap();
+                        if let Ok(mut ot) = outputs.lock() {
+                            ot.output(
+                                &thread_pod.output,
+                                &encode_message(&thread_pod, bf.as_str()),
+                            )
+                        }
+                        db::incr_offset(&thread_pod.uuid, incr_offset as i64);
+                        bf.clear();
                     }
-                    self.open(it);
-                }
-                None => {
-                    return;
-                }
-            };
-        }
-
-        let handle = match self.handles.get(path) {
-            Some(it) => it,
-            _ => {
-                warn!("frw not found handle {}", path);
-                return;
+                };
             }
-        };
+        });
 
-        if let Err(e) = handle.send(SendFileEvent::Other) {
-            err!("frw send write event error: {}, path: {}", e, path)
-        }
+        self.file_handles.insert(pod.uuid.to_string(), tx);
+
+        db::apply(&pod.set_state_run())
     }
 }
 
 fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
     if message.len() == 0 {
-        return "".to_owned();
+        return "".to_string();
     }
-    json!({"custom":
+    json!({
+        "custom":
             {
-            "nodeId":pod.pod_name,
-            "container":pod.container_name,
-            "serviceName":pod.pod_name,
-            "ips":pod.ips,
-            "version":"v1.0.0"
+              "nodeId":pod.pod,
+              "container":pod.container,
+             "serviceName":pod.pod,
+              "ips":pod.ips,
+              "version":"v1.0.0",
+              "path":pod.uuid.to_string(),
             },
         "message":message}
     )
@@ -167,6 +151,6 @@ mod tests {
     #[test]
     fn it_works() {
         let mut input = FileReaderWriter::new(10);
-        input.open_event(Pod::default());
+        input.open_event(&mut Pod::default());
     }
 }

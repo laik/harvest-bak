@@ -34,7 +34,7 @@ impl<T: Clone> Dispatch<T> {
         }
     }
 
-    pub fn dispatch(&mut self, name: String, d: T) {
+    pub fn dispatch(&mut self, name: String, d: &T) {
         if self.listeners.contains_key(&name) {
             for listener in self.listeners.get(&name).unwrap().iter() {
                 listener.handle(d.clone())
@@ -84,7 +84,7 @@ mod tests {
         dispatch.registry("pod_name_update".to_owned(), li2);
 
         let join_handle = thread::spawn(move || {
-            dispatch.dispatch("pod_name_update".to_owned(), "abc".to_owned())
+            dispatch.dispatch("pod_name_update".to_owned(), &"abc".to_string());
         });
 
         for item in rx.recv() {

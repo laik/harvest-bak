@@ -65,19 +65,15 @@ impl MemDatabase {
                         .or_insert(pod.clone())
                         .merge_with(&pod),
                     Event::Delete => {
-                        if pod.namespace != "" {
-                            m.retain(|_, v| {
-                                !(pod.namespace == v.namespace || pod.pod_name == v.pod_name)
-                            });
-
+                        if pod.ns != "" && pod.uuid == "" && pod.pod != "" {
+                            m.retain(|_, inner| !inner.compare_ns_pod(&pod));
                             continue;
                         }
-
                         m.remove(&pod.uuid);
                     }
                     Event::IncrOffset => {
-                        if let Some(_pod) = m.get_mut(&pod.uuid) {
-                            _pod.offset += pod.incr_offset
+                        if let Some(inner) = m.get_mut(&pod.uuid) {
+                            inner.offset += pod.last_offset
                         };
                     }
                     Event::Close => {

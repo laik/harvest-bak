@@ -8,14 +8,14 @@ extern crate rocket;
 extern crate lazy_static;
 
 mod api;
-mod listener;
+mod handle;
 mod server;
 
 pub use serde_json;
 
 pub(crate) use api::*;
 pub use common::Result;
-pub(crate) use listener::{ScannerCloseEvent, ScannerOpenEvent, ScannerWriteEvent};
+pub(crate) use handle::{ScannerCloseEvent, ScannerOpenEvent, ScannerWriteEvent};
 pub use server::Harvest;
 
 use log::error as err;
@@ -68,7 +68,7 @@ lazy_static! {
 }
 
 pub(crate) fn set_rule(key: &str, value: Rule) {
-    match GLOBAL_RULES.try_write() {
+    match GLOBAL_RULES.write() {
         Ok(mut db) => {
             db.insert(key.to_string(), value);
         }

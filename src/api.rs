@@ -1,71 +1,58 @@
 use super::{rules_json, set_rule, Rule};
-use common::Result;
-use log::{error as err, info};
-use rocket::State;
 use rocket::{get, post};
 use rocket_contrib::json::{Json, JsonValue};
 use serde::{Deserialize, Serialize};
 use sse_client::EventSource;
-use std::thread::{self, JoinHandle};
 
 const RUN: &'static str = "run";
 const STOP: &'static str = "stop";
 
-pub struct ApiClient;
+pub(crate) fn recv_rule(addr: &str, node_name: &str) {
+    let event_sources = match EventSource::new(addr) {
+        Ok(it) => it,
+        Err(e) => {
+            eprintln!("{:?}", e);
+            return;
+        }
+    };
 
-impl ApiClient {
-    pub fn new() -> Self {
-        Self {}
-    }
+    println!("🚀 start watch to api server");
 
-    pub(crate) fn watch(&mut self, addr: &str, node_name: &str) -> Result<JoinHandle<()>> {
-        let event_sources = match EventSource::new(addr) {
+    for event in event_sources.receiver().iter() {
+        println!("recv event {:?}", event);
+        let request = match serde_json::from_str::<ApiServerRequest>(&event.data) {
             Ok(it) => it,
             Err(e) => {
-                err!("start api client watch open event source error:{:?}", e);
-                return Err(Box::new(e));
+                eprintln!(
+                    "recv event parse json error or connect to api server error: {:?}",
+                    e
+                );
+                continue;
             }
         };
+        if !request.has_node_events(&node_name) {
+            continue;
+        }
 
-        let node_name = node_name.to_owned();
-        let jh = thread::Builder::new().name("ApiClient Watch".to_string()).spawn(move || {
-            info!("🚀 start watch to api server");
-            for event in event_sources.receiver().iter() {
-                match serde_json::from_str::<ApiServerRequest>(&event.data) {
-                    Ok(request) => {
-                        if !request.has_node_events(&node_name) {
-                            continue;
-                        }
-
-                        for pod in request.pods.iter() {
-                            if request.op == RUN {
-                                // first add to global rules
-                                set_rule(
-                                    pod.pod.into(),
-                                    Rule {
-                                        upload: true,
-                                        ..Default::default()
-                                    },
-                                );
-
-                                // TODO 导致死锁！！！！
-                                db::pod_upload_start(request.ns, pod.pod);
-                            } else if request.op == STOP {
-                                db::pod_upload_stop(request.ns, pod.pod.into());
-                            } else {
-                                info!("api server event source send unknow event {:?}", request)
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        err!("watch api server parse json error or connect to api server error: {:?}", e)
-                    }
-                }
+        for pod in request.pods.iter() {
+            if request.op == RUN {
+                set_rule(
+                    pod.pod.into(),
+                    Rule {
+                        upload: true,
+                        ..Default::default()
+                    },
+                );
+                db::pod_upload_start(request.ns, pod.pod);
+            } else if request.op == STOP {
+                db::pod_upload_stop(request.ns, pod.pod.into());
+            } else {
+                println!("api server event source send unknow event {:?}", request)
             }
-        });
-        Ok(jh.unwrap())
+        }
     }
 }
+
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Pod<'a> {
     node: &'a str,
@@ -105,7 +92,7 @@ pub(crate) struct Request {
 
 #[get("/rules")]
 pub(crate) fn query_rules() -> JsonValue {
-    json!({"status":"ok","reason":format!("{}",rules_json())})
+    json!(rules_json())
 }
 
 // /pod/collect list ns.pod start collect to output
@@ -120,7 +107,7 @@ pub(crate) fn post_pod(req: Json<Request>) -> JsonValue {
 
     for (_, pod) in db::get_slice_with_ns_pod(&req.0.namespace, &req.0.pod).iter() {
         let mut pod = pod.to_owned();
-        pod.upload = req.0.upload;
+        pod.is_upload = req.0.upload;
         pod.filter = req.0.filter.clone();
         pod.output = req.0.output.clone();
         db::apply(&pod);
