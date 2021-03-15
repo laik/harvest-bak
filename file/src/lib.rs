@@ -126,7 +126,7 @@ fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
     json!({
         "custom":
             {
-              "nodeId":pod.pod,
+              "nodeId":pod.pod_name,
               "container":pod.container,
              "serviceName":pod.service_name,
               "ips":pod.ips,

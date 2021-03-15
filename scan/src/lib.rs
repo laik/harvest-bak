@@ -49,7 +49,7 @@ impl PathEventInfo {
         Pod {
             path: self.path.clone(),
             ns: self.namespace.clone(),
-            pod: self.pod.clone(),
+            pod_name: self.pod.clone(),
             container: self.container.clone(),
             ..Default::default()
         }

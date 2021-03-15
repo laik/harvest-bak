@@ -1,4 +1,4 @@
-use super::tasks_json;
+use super::{run_task, stop_task, tasks_json, Task};
 use rocket::{get, post};
 use rocket_contrib::json::{Json, JsonValue};
 use serde::{Deserialize, Serialize};
@@ -34,33 +34,52 @@ pub(crate) fn recv_tasks(addr: &str, node_name: &str) {
             continue;
         }
 
-        for item in request.pods.iter() {
+        for task in request.to_pod_tasks() {
             if request.op == RUN {
-                db::pod_upload_start(request.ns, item.pod);
+                run_task(&task);
             } else if request.op == STOP {
-                db::pod_upload_stop(request.ns, item.pod);
+                stop_task(&task);
             } else {
-                println!("api server event source send unknow event {:?}", request)
+                println!("recv api server unknow event: {:?}", request)
             }
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct Pod<'a> {
-    node: &'a str,
-    pod: &'a str,
-    ips: Vec<&'a str>,
-    offset: i64,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct RequestPod<'a> {
+    pub(crate) node: &'a str,
+    pub(crate) pod: &'a str,
+    pub(crate) ips: Vec<&'a str>,
+    pub(crate) offset: i64,
 }
 
-//{"op":"add","ns":"default","service_name":"example_service","pods":[{"node":"node1","pod":"example","ips":["127.0.0.1"],"offset":0}]}
+//{"op":"run","ns":"default","service_name":"xx_service","rules":"","output":"fake_output","pods":[{"node":"node1","pod":"xx","ips":["127.0.0.1"],"offset":0}]}
+//{"op":"stop","ns":"default","service_name":"xx_service","rules":"","output":"fake_output","pods":[{"node":"node1","pod":"xx","ips":["127.0.0.1"],"offset":0}]}
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct ApiServerRequest<'a> {
     op: &'a str,
-    ns: &'a str,
-    service_name: &'a str,
-    pods: Vec<Pod<'a>>,
+    pub(crate) ns: &'a str,
+    pub(crate) output: &'a str,
+    pub(crate) rules: &'a str,
+    pub(crate) service_name: &'a str,
+    pub(crate) pods: Vec<RequestPod<'a>>,
+}
+
+impl<'a> ApiServerRequest<'a> {
+    pub fn to_pod_tasks(&self) -> Vec<Task> {
+        self.pods
+            .iter()
+            .map(|req_pod| {
+                let mut task = Task::from(req_pod.clone());
+                task.pod.ns = self.ns.to_string();
+                task.pod.output = self.output.to_string();
+                task.pod.service_name = self.service_name.to_string();
+                task.pod.filter = self.rules.to_string();
+                task
+            })
+            .collect::<Vec<Task>>()
+    }
 }
 
 impl<'a> ApiServerRequest<'a> {

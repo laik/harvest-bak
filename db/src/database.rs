@@ -133,7 +133,7 @@ impl MemDatabase {
                         }
                     }
                     Event::Delete => {
-                        if pod.ns != "" && pod.path == "" && pod.pod != "" {
+                        if pod.ns != "" && pod.path == "" && pod.pod_name != "" {
                             m.retain(|_, inner| !inner.compare_ns_pod(&pod));
                             continue;
                         }

@@ -9,7 +9,7 @@ pub enum State {
 pub struct Pod {
     pub ns: String,
     pub service_name: String,
-    pub pod: String,
+    pub pod_name: String,
     pub container: String,
     pub path: String, // on this the uuid path is unique identifier
     pub offset: i64,
@@ -19,6 +19,7 @@ pub struct Pod {
     pub output: String,
     pub ips: Vec<String>,
     pub last_offset: i64,
+    pub node_name: String,
 }
 
 impl Pod {
@@ -75,7 +76,7 @@ impl Pod {
     }
 
     pub fn compare_ns_pod(&self, other: &Pod) -> bool {
-        self.ns == other.ns && self.pod == other.pod
+        self.ns == other.ns && self.pod_name == other.pod_name
     }
 
     pub fn incr_offset(&mut self, offset: i64) -> &mut Self {
@@ -92,7 +93,7 @@ impl Default for Pod {
             path: "".to_string(),
             offset: 0,
             ns: "".to_string(),
-            pod: "".to_string(),
+            pod_name: "".to_string(),
             container: "".to_string(),
             is_upload: false,
             state: State::Ready,
@@ -100,6 +101,7 @@ impl Default for Pod {
             output: "".to_string(),
             ips: Vec::new(),
             last_offset: 0,
+            node_name: "".to_string(),
         }
     }
 }

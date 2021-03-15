@@ -98,7 +98,7 @@ pub fn get_slice_with_ns_pod(ns: &str, pod: &str) -> Vec<(String, Pod)> {
         .read()
         .unwrap()
         .iter()
-        .filter(|(_, v)| v.ns == ns && v.pod == pod)
+        .filter(|(_, v)| v.ns == ns && v.pod_name == pod)
         .map(|(uuid, pod)| (uuid.clone(), pod.clone()))
         .collect::<Vec<(String, Pod)>>()
 }
@@ -109,7 +109,7 @@ pub fn delete_with_ns_pod(pod_ns: &str, pod_name: &str) {
             event: Event::Delete,
             pod: Pod {
                 ns: pod_ns.to_string(),
-                pod: pod_name.to_string(),
+                pod_name: pod_name.to_string(),
                 ..Default::default()
             },
         })

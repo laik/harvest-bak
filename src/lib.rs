@@ -11,6 +11,7 @@ mod api;
 mod handle;
 mod server;
 
+use db::Pod;
 pub use serde_json;
 
 pub(crate) use api::*;
@@ -24,6 +25,13 @@ use crossbeam_channel::{unbounded, Sender};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 use std::{collections::HashMap, thread};
+
+lazy_static! {
+    static ref TASKS: TaskStorage = {
+        let task_storage = TaskStorage::new();
+        task_storage
+    };
+}
 
 type TaskList = Vec<(String, Task)>;
 
@@ -41,23 +49,31 @@ impl TaskListMarshaller {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct Task {
-    pub(crate) ns: String,
-    pub(crate) service_name: String,
-    pub(crate) pod_name: String,
-    pub(crate) upload: bool,
-    pub(crate) rule: String,
-    pub(crate) output: String,
+    pod: Pod,
+}
+
+impl<'a> From<RequestPod<'a>> for Task {
+    fn from(a: RequestPod) -> Self {
+        let ips = a
+            .ips
+            .iter()
+            .map(|ip| ip.to_string())
+            .collect::<Vec<String>>();
+        Self {
+            pod: Pod {
+                pod_name: a.pod.to_string(),
+                offset: a.offset,
+                ips,
+                ..Default::default()
+            },
+        }
+    }
 }
 
 impl Default for Task {
     fn default() -> Self {
         Self {
-            upload: false,
-            rule: "".to_string(),
-            service_name: "".to_string(),
-            pod_name: "".to_string(),
-            ns: "".to_string(),
-            output: "".to_string(),
+            pod: Pod::default(),
         }
     }
 }
@@ -95,8 +111,8 @@ impl TaskStorage {
                                 continue;
                             }
                         };
-                        task.upload = true;
-                        tasks.entry(task.pod_name.clone()).or_insert(task);
+                        task.pod.upload();
+                        tasks.entry(task.pod.pod_name.clone()).or_insert(task);
                     }
                     TaskMessage::Stop(mut task) => {
                         let mut tasks = match thread_tasks.write() {
@@ -106,21 +122,14 @@ impl TaskStorage {
                                 continue;
                             }
                         };
-                        task.upload = false;
-                        tasks.entry(task.pod_name.clone()).or_insert(task);
+                        task.pod.un_upload();
+                        tasks.entry(task.pod.pod_name.clone()).or_insert(task);
                     }
                 }
             }
         });
         Self { data, tx }
     }
-}
-
-lazy_static! {
-    static ref TASKS: TaskStorage = {
-        let t = TaskStorage::new();
-        t
-    };
 }
 
 pub(crate) fn run_task(task: &Task) {
@@ -131,7 +140,7 @@ pub(crate) fn stop_task(task: &Task) {
     TASKS.tx.send(TaskMessage::Stop(task.clone())).unwrap();
 }
 
-pub(crate) fn close() {
+pub(crate) fn task_close() {
     TASKS.tx.send(TaskMessage::Close).unwrap();
 }
 
@@ -159,59 +168,6 @@ pub(crate) fn get_pod_task(pod_name: &str) -> Option<Task> {
         }
     }
 }
-
-// pub(crate) fn set_rule(key: &str, task: Task) {
-//     match TASKS.write() {
-//         Ok(mut db) => {
-//             db.insert(key.to_string(), task);
-//         }
-//         Err(e) => {
-//             err!("{}", e);
-//         }
-//     }
-// }
-
-// pub(crate) fn tasks_json() -> String {
-//     if let Ok(db) = TASKS.read() {
-//         return TaskListMarshaller(
-//             db.iter()
-//                 .map(|(k, v)| (k.clone(), v.clone()))
-//                 .collect::<Vec<(String, Task)>>(),
-//         )
-//         .to_json();
-//     }
-//     "".into()
-// }
-
-// pub(crate) fn apply_tasks() {
-//     if let Ok(hm) = TASKS.read() {
-//         for (pod_name, rule) in hm.iter() {
-//             let mut result_pod_list = vec![];
-//             for (_, mut v) in db::get_slice_with_ns_pod(&rule.ns, pod_name) {
-//                 if rule.upload {
-//                     v.upload();
-//                 }
-//                 result_pod_list.push(v.clone());
-//             }
-//             for p in result_pod_list {
-//                 db::apply(&p);
-//             }
-//         }
-//     }
-// }
-
-// pub(crate) fn get_task(key: &str) -> Option<Task> {
-//     match TASKS.read() {
-//         Ok(db) => match db.get(key) {
-//             Some(task) => Some(task.clone()),
-//             None => None,
-//         },
-//         Err(e) => {
-//             err!("{}", e);
-//             None
-//         }
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

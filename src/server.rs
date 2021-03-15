@@ -94,6 +94,7 @@ impl<'a> Harvest<'a> {
             item.join().unwrap();
         }
 
+        task_close();
         Ok(())
     }
 }
