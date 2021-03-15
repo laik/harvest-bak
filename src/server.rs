@@ -43,7 +43,7 @@ impl<'a> Harvest<'a> {
         }
 
         db::registry_open_event_listener(DBOpenEvent(frw.clone()));
-        db::registry_open_event_listener(DBCloseEvent(frw.clone()));
+        db::registry_close_event_listener(DBCloseEvent(frw.clone()));
 
         let mut threads = vec![];
         // start auto scanner with a new thread
@@ -81,7 +81,7 @@ impl<'a> Harvest<'a> {
                 .unwrap();
 
             rocket::custom(cfg)
-                .mount("/", routes![post_pod, query_pod, query_rules])
+                .mount("/", routes![post_pod, query_pod, query_tasks])
                 .register(catchers![not_found])
                 .launch();
         }));

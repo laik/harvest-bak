@@ -37,6 +37,10 @@ impl Pod {
         self
     }
 
+    pub fn is_upload(&mut self) -> bool {
+        self.is_upload == true
+    }
+
     pub fn upload(&mut self) -> &mut Self {
         self.is_upload = true;
         self
@@ -59,11 +63,11 @@ impl Pod {
     }
 
     pub fn is_ready(&self) -> bool {
-        self.state == State::Running
+        self.state == State::Ready
     }
 
     pub fn is_stop(&self) -> bool {
-        self.state == State::Running
+        self.state == State::Stopped
     }
 
     pub fn merge_with(&mut self, other: &Pod) {

@@ -1,5 +1,4 @@
 use common::{Item, Result};
-use log::{error as err, warn};
 use once_cell::sync::Lazy;
 use std::{
     collections::HashMap,
@@ -48,15 +47,15 @@ impl Outputs {
             if line.len() == 0 {
                 return;
             }
-            warn!("outputs not found output name `{}`", name);
-            warn!("use stdout {}", line);
+            eprintln!("output not found `{:?}`", name);
+            eprintln!("use stdout {:?}", line);
             return;
         }
 
         match self.output_listener.get_mut(name) {
             Some(o) => {
                 if let Err(e) = o.write(Item::from(line)) {
-                    err!("{:?}", e);
+                    eprintln!("{:?}", e);
                 }
             }
             _ => {}

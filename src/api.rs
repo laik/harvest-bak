@@ -16,10 +16,10 @@ pub(crate) fn recv_tasks(addr: &str, node_name: &str) {
         }
     };
 
-    println!("🚀 start watch to api server");
+    println!("🚀 start watch to api server !!!");
 
     for event in event_sources.receiver().iter() {
-        println!("recv event {:?}", event);
+        println!("recv task {:?}", event);
         let request = match serde_json::from_str::<ApiServerRequest>(&event.data) {
             Ok(it) => it,
             Err(e) => {
@@ -84,7 +84,7 @@ pub(crate) struct Request {
 }
 
 #[get("/tasks")]
-pub(crate) fn query_rules() -> JsonValue {
+pub(crate) fn query_tasks() -> JsonValue {
     json!(tasks_json())
 }
 

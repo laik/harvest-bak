@@ -64,26 +64,30 @@ impl Default for Task {
 
 #[derive(Debug)]
 enum TaskMessage {
-    Apply(Task),
+    Run(Task),
+    Stop(Task),
     Close,
 }
 
 pub(crate) struct TaskStorage {
-    tasks: Arc<RwLock<HashMap<String, Task>>>,
+    data: Arc<RwLock<HashMap<String, Task>>>,
     // internal event send queue
     tx: Sender<TaskMessage>,
 }
 
 impl TaskStorage {
     pub fn new() -> Self {
-        let tasks = Arc::new(RwLock::new(HashMap::<String, Task>::new()));
+        let data = Arc::new(RwLock::new(HashMap::<String, Task>::new()));
         let (tx, rx) = unbounded::<TaskMessage>();
 
-        let thread_tasks = Arc::clone(&tasks);
+        let thread_tasks = Arc::clone(&data);
         thread::spawn(move || {
             while let Ok(task_message) = rx.recv() {
                 match task_message {
-                    TaskMessage::Apply(task) => {
+                    TaskMessage::Close => {
+                        return;
+                    }
+                    TaskMessage::Run(mut task) => {
                         let mut tasks = match thread_tasks.write() {
                             Ok(it) => it,
                             Err(e) => {
@@ -91,15 +95,24 @@ impl TaskStorage {
                                 continue;
                             }
                         };
+                        task.upload = true;
                         tasks.entry(task.pod_name.clone()).or_insert(task);
                     }
-                    TaskMessage::Close => {
-                        return;
+                    TaskMessage::Stop(mut task) => {
+                        let mut tasks = match thread_tasks.write() {
+                            Ok(it) => it,
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                continue;
+                            }
+                        };
+                        task.upload = false;
+                        tasks.entry(task.pod_name.clone()).or_insert(task);
                     }
                 }
             }
         });
-        Self { tasks, tx }
+        Self { data, tx }
     }
 }
 
@@ -110,13 +123,42 @@ lazy_static! {
     };
 }
 
-pub(crate) fn run_task(task: &Task) {}
-pub(crate) fn stop_task(task: &Task) {}
-
-pub(crate) fn tasks_json<'a>() -> &'a str {
-    ""
+pub(crate) fn run_task(task: &Task) {
+    TASKS.tx.send(TaskMessage::Run(task.clone())).unwrap();
 }
-pub(crate) fn get_task(task: &Task) {}
+
+pub(crate) fn stop_task(task: &Task) {
+    TASKS.tx.send(TaskMessage::Stop(task.clone())).unwrap();
+}
+
+pub(crate) fn close() {
+    TASKS.tx.send(TaskMessage::Close).unwrap();
+}
+
+pub(crate) fn tasks_json() -> String {
+    if let Ok(tasks) = TASKS.data.read() {
+        let task_list = tasks
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<Vec<(String, Task)>>();
+
+        return TaskListMarshaller(task_list).to_json();
+    }
+    "".to_string()
+}
+
+pub(crate) fn get_pod_task(pod_name: &str) -> Option<Task> {
+    match TASKS.data.read() {
+        Ok(db) => match db.get(pod_name) {
+            Some(task) => Some(task.clone()),
+            None => None,
+        },
+        Err(e) => {
+            eprintln!("{}", e);
+            None
+        }
+    }
+}
 
 // pub(crate) fn set_rule(key: &str, task: Task) {
 //     match TASKS.write() {
