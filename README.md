@@ -1,8 +1,7 @@
 # harvest(WIP)
 
 
-pod info 
-    state:  ready running stopped
+[添加入DB,数据状态为Ready] --> [Task应用，修改状态] --> [数据状态切换为Running,dispath事件，frwOpen]
 
 
 

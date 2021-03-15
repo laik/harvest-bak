@@ -9,6 +9,9 @@ edition = "2018"
 [dependencies.common]
 path = "../common"
 
+[dependencies.event]
+path = "../event"
+
 [dependencies]
 strum = { version = "0.20", features = ["derive"] }
 serde = "1.0.123"

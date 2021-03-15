@@ -1,19 +1,25 @@
 use super::Pod;
 use crossbeam_channel::{unbounded, Sender};
+use event::{Dispatch, Listener};
 use log::error as err;
 use std::sync::RwLock;
 use std::thread;
 use std::{collections::HashMap, sync::Arc};
 use strum::AsRefStr;
 
-// #[derive(AsRefStr, Debug, Eq, Clone, PartialOrd)]
+pub(crate) fn new_arc_rwlock<T>(t: T) -> Arc<RwLock<T>> {
+    Arc::new(RwLock::new(t))
+}
+
 #[derive(AsRefStr, Debug, Clone)]
 pub enum Event {
-    #[strum(serialize = "apply")]
-    Apply,
-    #[strum(serialize = "del")]
+    #[strum(serialize = "insert")]
+    Insert,
+    #[strum(serialize = "update")]
+    Update,
+    #[strum(serialize = "delete")]
     Delete,
-    #[strum(serialize = "incr_offset")]
+    #[strum(serialize = "offset")]
     IncrOffset,
     #[strum(serialize = "close")]
     Close,
@@ -30,22 +36,64 @@ pub struct Message {
     pub pod: Pod,
 }
 
+#[derive(AsRefStr, Debug, Clone)]
+enum ListenerEvent {
+    #[strum(serialize = "open")]
+    Open,
+    #[strum(serialize = "close")]
+    Close,
+}
+
+pub struct MemDatabaseEventDispatcher {
+    dispatchers: Dispatch<Pod>,
+}
+
+impl MemDatabaseEventDispatcher {
+    pub(crate) fn new() -> Self {
+        Self {
+            dispatchers: Dispatch::<Pod>::new(),
+        }
+    }
+
+    pub(crate) fn registry_open_event_listener<L>(&mut self, l: L)
+    where
+        L: Listener<Pod> + Send + Sync + 'static,
+    {
+        self.dispatchers.registry(ListenerEvent::Open.as_ref(), l)
+    }
+
+    pub(crate) fn registry_close_event_listener<L>(&mut self, l: L)
+    where
+        L: Listener<Pod> + Send + Sync + 'static,
+    {
+        self.dispatchers.registry(ListenerEvent::Close.as_ref(), l)
+    }
+
+    pub(crate) fn dispatch_open_event(&mut self, pod: &Pod) {
+        self.dispatchers.dispatch(ListenerEvent::Open.as_ref(), pod)
+    }
+
+    pub(crate) fn dispatch_close_event(&mut self, pod: &Pod) {
+        self.dispatchers
+            .dispatch(ListenerEvent::Close.as_ref(), pod)
+    }
+}
+
 pub struct MemDatabase {
     // pod key is the pod path uuid
     pub(crate) pods: Arc<RwLock<HashMap<UUID, Pod>>>,
     // internal event send queue
     pub(crate) tx: Sender<Message>,
+    // db event dispatchers
+    pub(crate) dispatchers: Arc<RwLock<MemDatabaseEventDispatcher>>,
 }
 
 impl MemDatabase {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn default() -> Self {
+    pub fn new(dispatchers: Arc<RwLock<MemDatabaseEventDispatcher>>) -> Self {
         let (tx, rx) = unbounded::<Message>();
-        let hm = Arc::new(RwLock::new(HashMap::<UUID, Pod>::new()));
+        let hm = new_arc_rwlock(HashMap::<UUID, Pod>::new());
         let t_hm = Arc::clone(&hm);
+        let t_dispatchers = Arc::clone(&dispatchers);
         thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
                 let evt = msg.event;
@@ -60,30 +108,58 @@ impl MemDatabase {
                 };
 
                 match evt {
-                    Event::Apply => m
-                        .entry(pod.uuid.to_string())
-                        .or_insert(pod.clone())
-                        .merge_with(&pod),
+                    Event::Update => {
+                        m.entry(pod.path.to_string())
+                            .or_insert(pod.clone())
+                            .merge_with(&pod);
+                        match pod.state {
+                            crate::State::Running => {
+                                match t_dispatchers.write() {
+                                    Ok(mut dispatch) => dispatch.dispatch_open_event(&pod),
+                                    Err(e) => {
+                                        eprintln!("MemDatabase thread dispath open event failed, error:{:?}",e)
+                                    }
+                                }
+                            }
+                            crate::State::Stopped => {
+                                match t_dispatchers.write() {
+                                    Ok(mut dispatch) => dispatch.dispatch_close_event(&pod),
+                                    Err(e) => {
+                                        eprintln!("MemDatabase thread dispath close event failed, error:{:?}",e)
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                     Event::Delete => {
-                        if pod.ns != "" && pod.uuid == "" && pod.pod != "" {
+                        if pod.ns != "" && pod.path == "" && pod.pod != "" {
                             m.retain(|_, inner| !inner.compare_ns_pod(&pod));
                             continue;
                         }
-                        m.remove(&pod.uuid);
+                        m.remove(&pod.path);
                     }
                     Event::IncrOffset => {
-                        if let Some(inner) = m.get_mut(&pod.uuid) {
+                        if let Some(inner) = m.get_mut(&pod.path) {
                             inner.offset += pod.last_offset
                         };
                     }
+
                     Event::Close => {
                         break;
+                    }
+                    Event::Insert => {
+                        m.insert(pod.path.clone(), pod);
                     }
                 };
             }
         });
 
-        Self { pods: hm, tx }
+        Self {
+            pods: hm,
+            tx,
+            dispatchers,
+        }
     }
 }
 
@@ -92,7 +168,7 @@ mod tests {
     use crate::Event;
     #[test]
     fn event_it_works() {
-        assert_eq!(Event::Apply.as_ref(), "apply");
-        assert_eq!(Event::Delete.as_ref(), "del");
+        assert_eq!(Event::Insert.as_ref(), "insert");
+        assert_eq!(Event::Delete.as_ref(), "delete");
     }
 }

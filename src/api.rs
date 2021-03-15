@@ -1,4 +1,4 @@
-use super::{rules_json, set_rule, Rule};
+use super::tasks_json;
 use rocket::{get, post};
 use rocket_contrib::json::{Json, JsonValue};
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use sse_client::EventSource;
 const RUN: &'static str = "run";
 const STOP: &'static str = "stop";
 
-pub(crate) fn recv_rule(addr: &str, node_name: &str) {
+pub(crate) fn recv_tasks(addr: &str, node_name: &str) {
     let event_sources = match EventSource::new(addr) {
         Ok(it) => it,
         Err(e) => {
@@ -34,18 +34,11 @@ pub(crate) fn recv_rule(addr: &str, node_name: &str) {
             continue;
         }
 
-        for pod in request.pods.iter() {
+        for item in request.pods.iter() {
             if request.op == RUN {
-                set_rule(
-                    pod.pod.into(),
-                    Rule {
-                        upload: true,
-                        ..Default::default()
-                    },
-                );
-                db::pod_upload_start(request.ns, pod.pod);
+                db::pod_upload_start(request.ns, item.pod);
             } else if request.op == STOP {
-                db::pod_upload_stop(request.ns, pod.pod.into());
+                db::pod_upload_stop(request.ns, item.pod);
             } else {
                 println!("api server event source send unknow event {:?}", request)
             }
@@ -90,9 +83,9 @@ pub(crate) struct Request {
     upload: bool,
 }
 
-#[get("/rules")]
+#[get("/tasks")]
 pub(crate) fn query_rules() -> JsonValue {
-    json!(rules_json())
+    json!(tasks_json())
 }
 
 // /pod/collect list ns.pod start collect to output
@@ -110,7 +103,7 @@ pub(crate) fn post_pod(req: Json<Request>) -> JsonValue {
         pod.is_upload = req.0.upload;
         pod.filter = req.0.filter.clone();
         pod.output = req.0.output.clone();
-        db::apply(&pod);
+        db::update(&pod);
     }
 
     json!({"status":"ok"})

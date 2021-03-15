@@ -7,11 +7,12 @@ pub enum State {
 }
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Pod {
-    pub uuid: String, // on this the uuid path is unique identifier
-    pub offset: i64,
     pub ns: String,
+    pub service_name: String,
     pub pod: String,
     pub container: String,
+    pub path: String, // on this the uuid path is unique identifier
+    pub offset: i64,
     pub is_upload: bool,
     pub state: State,
     pub filter: String,
@@ -83,15 +84,16 @@ impl Pod {
 impl Default for Pod {
     fn default() -> Pod {
         Pod {
-            uuid: "".into(),
+            service_name: "".to_string(),
+            path: "".to_string(),
             offset: 0,
-            ns: "".into(),
-            pod: "".into(),
-            container: "".into(),
+            ns: "".to_string(),
+            pod: "".to_string(),
+            container: "".to_string(),
             is_upload: false,
             state: State::Ready,
-            filter: "".into(),
-            output: "".into(),
+            filter: "".to_string(),
+            output: "".to_string(),
             ips: Vec::new(),
             last_offset: 0,
         }

@@ -22,21 +22,21 @@ impl<T: Clone> Dispatch<T> {
         }
     }
 
-    pub fn registry<L>(&mut self, name: String, listener: L)
+    pub fn registry<L>(&mut self, name: &str, listener: L)
     where
         L: Listener<T> + Send + Sync + 'static,
     {
         let listener = Box::new(listener);
-        if self.listeners.contains_key(&name) {
-            self.listeners.get_mut(&name).unwrap().push(listener);
+        if self.listeners.contains_key(name) {
+            self.listeners.get_mut(name).unwrap().push(listener);
         } else {
-            self.listeners.insert(name, vec![listener]);
+            self.listeners.insert(name.to_string(), vec![listener]);
         }
     }
 
-    pub fn dispatch(&mut self, name: String, d: &T) {
-        if self.listeners.contains_key(&name) {
-            for listener in self.listeners.get(&name).unwrap().iter() {
+    pub fn dispatch(&mut self, name: &str, d: &T) {
+        if self.listeners.contains_key(name) {
+            for listener in self.listeners.get(name).unwrap().iter() {
                 listener.handle(d.clone())
             }
         }
@@ -80,11 +80,11 @@ mod tests {
         let tx2 = tx.clone();
         let li2 = ListenerImpl::new(tx2);
 
-        dispatch.registry("pod_name_update".to_owned(), li1);
-        dispatch.registry("pod_name_update".to_owned(), li2);
+        dispatch.registry(&"pod_name_update", li1);
+        dispatch.registry(&"pod_name_update", li2);
 
         let join_handle = thread::spawn(move || {
-            dispatch.dispatch("pod_name_update".to_owned(), &"abc".to_string());
+            dispatch.dispatch(&"pod_name_update", &"abc".to_string());
         });
 
         for item in rx.recv() {

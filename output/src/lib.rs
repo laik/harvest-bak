@@ -49,7 +49,7 @@ impl Outputs {
                 return;
             }
             warn!("outputs not found output name `{}`", name);
-            warn!("use default stdout {}", line);
+            warn!("use stdout {}", line);
             return;
         }
 
@@ -120,7 +120,7 @@ impl IOutput for Counter {
     fn write(&mut self, _: Item) -> Result<()> {
         self.0.fetch_add(1, Ordering::SeqCst);
         if self.0.load(Ordering::Relaxed) as i64 % 10000 == 0 {
-            println!("Kafka counter {:?}", self.0.load(Ordering::Relaxed));
+            println!("Counter {:?}", self.0.load(Ordering::Relaxed));
         }
         Ok(())
     }

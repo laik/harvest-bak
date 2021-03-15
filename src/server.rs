@@ -37,23 +37,21 @@ impl<'a> Harvest<'a> {
 
         if let Ok(mut scan) = scanner.write() {
             // registry scanner event handle
-            scan.append_close_event_handle(ScannerCloseEvent(frw.clone()));
-            scan.append_open_event_handle(ScannerOpenEvent(frw.clone()));
+            scan.append_open_event_handle(ScannerOpenEvent());
             scan.append_write_event_handle(ScannerWriteEvent(frw.clone()));
+            scan.append_close_event_handle(ScannerCloseEvent());
         }
 
-        let api_server_addr = self.api_server_addr.to_string().clone();
-        let node_name = self.node_name.to_string().clone();
+        db::registry_open_event_listener(DBOpenEvent(frw.clone()));
+        db::registry_open_event_listener(DBCloseEvent(frw.clone()));
+
         let mut threads = vec![];
-        threads.push(thread::spawn(move || {
-            recv_rule(&api_server_addr, &node_name);
-        }));
         // start auto scanner with a new thread
         threads.push(thread::spawn(move || {
             let mut scan = match scanner.write() {
                 Ok(it) => it,
                 Err(e) => {
-                    err!("{}", e);
+                    eprintln!("{}", e);
                     return;
                 }
             };
@@ -61,30 +59,36 @@ impl<'a> Harvest<'a> {
             let res = match scan.prepare_scan() {
                 Ok(it) => it,
                 Err(e) => {
-                    err!("{}", e);
+                    eprintln!("{}", e);
                     return;
                 }
             };
 
             // add to local MemDatabase
             for item in res.iter() {
-                db::apply(&item.to_pod())
+                db::insert(&item.to_pod())
             }
 
             if let Err(e) = scan.directory_watch_start() {
-                err!("{}", e);
+                eprintln!("{}", e);
             }
         }));
 
-        let cfg = Config::build(Environment::Development)
-            .address("0.0.0.0")
-            .port(8080)
-            .unwrap();
+        threads.push(thread::spawn(move || {
+            let cfg = Config::build(Environment::Development)
+                .address("0.0.0.0")
+                .port(8080)
+                .unwrap();
 
-        rocket::custom(cfg)
-            .mount("/", routes![post_pod, query_pod, query_rules])
-            .register(catchers![not_found])
-            .launch();
+            rocket::custom(cfg)
+                .mount("/", routes![post_pod, query_pod, query_rules])
+                .register(catchers![not_found])
+                .launch();
+        }));
+
+        let api_server_addr = self.api_server_addr.to_string().clone();
+        let node_name = self.node_name.to_string().clone();
+        recv_tasks(&api_server_addr, &node_name);
 
         for item in threads {
             item.join().unwrap();

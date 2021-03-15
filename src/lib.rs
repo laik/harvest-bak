@@ -15,20 +15,22 @@ pub use serde_json;
 
 pub(crate) use api::*;
 pub use common::Result;
-pub(crate) use handle::{ScannerCloseEvent, ScannerOpenEvent, ScannerWriteEvent};
+pub(crate) use handle::{
+    DBCloseEvent, DBOpenEvent, ScannerCloseEvent, ScannerOpenEvent, ScannerWriteEvent,
+};
 pub use server::Harvest;
 
-use log::error as err;
+use crossbeam_channel::{unbounded, Sender};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::{collections::HashMap, thread};
 
-type RuleList = Vec<(String, Rule)>;
+type TaskList = Vec<(String, Task)>;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RuleListMarshaller(RuleList);
+pub struct TaskListMarshaller(TaskList);
 
-impl RuleListMarshaller {
+impl TaskListMarshaller {
     pub fn to_json(&self) -> String {
         match serde_json::to_string(&self.0) {
             Ok(contents) => contents,
@@ -38,87 +40,136 @@ impl RuleListMarshaller {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct Rule {
+pub(crate) struct Task {
+    pub(crate) ns: String,
+    pub(crate) service_name: String,
+    pub(crate) pod_name: String,
     pub(crate) upload: bool,
     pub(crate) rule: String,
-    pub(crate) service_name: String,
-    pub(crate) ns: String,
     pub(crate) output: String,
 }
 
-impl Default for Rule {
+impl Default for Task {
     fn default() -> Self {
         Self {
             upload: false,
-            rule: "".into(),
-            service_name: "".into(),
-            ns: "".into(),
-            output: "".into(),
+            rule: "".to_string(),
+            service_name: "".to_string(),
+            pod_name: "".to_string(),
+            ns: "".to_string(),
+            output: "".to_string(),
         }
     }
 }
 
-pub(crate) type RuleStorage = Arc<RwLock<HashMap<String, Rule>>>;
+#[derive(Debug)]
+enum TaskMessage {
+    Apply(Task),
+    Close,
+}
+
+pub(crate) struct TaskStorage {
+    tasks: Arc<RwLock<HashMap<String, Task>>>,
+    // internal event send queue
+    tx: Sender<TaskMessage>,
+}
+
+impl TaskStorage {
+    pub fn new() -> Self {
+        let tasks = Arc::new(RwLock::new(HashMap::<String, Task>::new()));
+        let (tx, rx) = unbounded::<TaskMessage>();
+
+        let thread_tasks = Arc::clone(&tasks);
+        thread::spawn(move || {
+            while let Ok(task_message) = rx.recv() {
+                match task_message {
+                    TaskMessage::Apply(task) => {
+                        let mut tasks = match thread_tasks.write() {
+                            Ok(it) => it,
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                continue;
+                            }
+                        };
+                        tasks.entry(task.pod_name.clone()).or_insert(task);
+                    }
+                    TaskMessage::Close => {
+                        return;
+                    }
+                }
+            }
+        });
+        Self { tasks, tx }
+    }
+}
 
 lazy_static! {
-    static ref GLOBAL_RULES: RuleStorage = {
-        let m = Arc::new(RwLock::new(HashMap::<String, Rule>::new()));
-        m
+    static ref TASKS: TaskStorage = {
+        let t = TaskStorage::new();
+        t
     };
 }
 
-pub(crate) fn set_rule(key: &str, value: Rule) {
-    match GLOBAL_RULES.write() {
-        Ok(mut db) => {
-            db.insert(key.to_string(), value);
-        }
-        Err(e) => {
-            err!("{}", e);
-        }
-    }
-}
+pub(crate) fn run_task(task: &Task) {}
+pub(crate) fn stop_task(task: &Task) {}
 
-pub(crate) fn rules_json() -> String {
-    if let Ok(db) = GLOBAL_RULES.read() {
-        return RuleListMarshaller(
-            db.iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect::<Vec<(String, Rule)>>(),
-        )
-        .to_json();
-    }
-    "".into()
+pub(crate) fn tasks_json<'a>() -> &'a str {
+    ""
 }
+pub(crate) fn get_task(task: &Task) {}
 
-pub(crate) fn apply_rules() {
-    if let Ok(hm) = GLOBAL_RULES.read() {
-        for (pod_name, rule) in hm.iter() {
-            let mut result_pod_list = vec![];
-            for (_, mut v) in db::get_slice_with_ns_pod(&rule.ns, pod_name) {
-                if rule.upload {
-                    v.upload();
-                }
-                result_pod_list.push(v.clone());
-            }
-            for p in result_pod_list {
-                db::apply(&p);
-            }
-        }
-    }
-}
+// pub(crate) fn set_rule(key: &str, task: Task) {
+//     match TASKS.write() {
+//         Ok(mut db) => {
+//             db.insert(key.to_string(), task);
+//         }
+//         Err(e) => {
+//             err!("{}", e);
+//         }
+//     }
+// }
 
-pub(crate) fn get_rule(key: &str) -> Option<Rule> {
-    match GLOBAL_RULES.read() {
-        Ok(db) => match db.get(key) {
-            Some(rule) => Some(rule.clone()),
-            None => None,
-        },
-        Err(e) => {
-            err!("{}", e);
-            None
-        }
-    }
-}
+// pub(crate) fn tasks_json() -> String {
+//     if let Ok(db) = TASKS.read() {
+//         return TaskListMarshaller(
+//             db.iter()
+//                 .map(|(k, v)| (k.clone(), v.clone()))
+//                 .collect::<Vec<(String, Task)>>(),
+//         )
+//         .to_json();
+//     }
+//     "".into()
+// }
+
+// pub(crate) fn apply_tasks() {
+//     if let Ok(hm) = TASKS.read() {
+//         for (pod_name, rule) in hm.iter() {
+//             let mut result_pod_list = vec![];
+//             for (_, mut v) in db::get_slice_with_ns_pod(&rule.ns, pod_name) {
+//                 if rule.upload {
+//                     v.upload();
+//                 }
+//                 result_pod_list.push(v.clone());
+//             }
+//             for p in result_pod_list {
+//                 db::apply(&p);
+//             }
+//         }
+//     }
+// }
+
+// pub(crate) fn get_task(key: &str) -> Option<Task> {
+//     match TASKS.read() {
+//         Ok(db) => match db.get(key) {
+//             Some(task) => Some(task.clone()),
+//             None => None,
+//         },
+//         Err(e) => {
+//             err!("{}", e);
+//             None
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

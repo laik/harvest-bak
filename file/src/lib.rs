@@ -2,7 +2,6 @@
 extern crate crossbeam_channel;
 use crossbeam_channel::{unbounded as async_channel, Sender};
 use db::Pod;
-use log::{error as err, warn};
 use output::OTS;
 use serde_json::json;
 use std::collections::HashMap;
@@ -29,50 +28,46 @@ impl FileReaderWriter {
     }
 
     pub fn close_event(&mut self, pod: &Pod) {
-        if let Some(tx) = self.file_handles.get(&pod.uuid) {
+        if let Some(tx) = self.file_handles.get(&pod.path) {
             if let Err(e) = tx.send(SendFileEvent::Close) {
-                err!(
-                    "frw send close event to path FileReaderWriter {:?} error: {:?}",
-                    &pod.uuid,
-                    e
-                );
+                eprintln!("frw send close to {:?} handle error: {:?}", &pod.path, e);
             }
-            self.file_handles.remove(&pod.uuid);
+            self.file_handles.remove(&pod.path);
         };
 
-        db::delete(&pod.uuid);
+        db::delete(&pod.path);
     }
 
     pub fn open_event(&mut self, pod: &mut Pod) {
-        if self.file_handles.contains_key(&pod.uuid) {
+        if self.file_handles.contains_key(&pod.path) {
             return;
         }
         self._open(pod);
     }
 
     pub fn write_event(&mut self, pod: &mut Pod) {
-        let handle = match self.file_handles.get(&pod.uuid) {
+        let handle = match self.file_handles.get(&pod.path) {
             Some(it) => it,
             _ => {
                 return;
             }
         };
         if let Err(e) = handle.send(SendFileEvent::Other) {
-            err!("frw send write event error: {}, path: {}", e, &pod.uuid)
+            eprintln!("frw send write event error: {}, path: {}", e, &pod.path)
         }
     }
 
     fn _open(&mut self, pod: &mut Pod) {
         let mut offset = pod.offset;
-        let mut file = match File::open(&pod.uuid) {
+        let mut file = match File::open(&pod.path) {
             Ok(file) => file,
             Err(e) => {
-                err!("frw open file {:?} error: {:?}", pod.uuid, e);
+                eprintln!("frw open file {:?} error: {:?}", pod.path, e);
                 return;
             }
         };
         if let Err(e) = file.seek(SeekFrom::Current(offset)) {
-            err!("frw open event seek failed, error: {}", e);
+            eprintln!("frw open event seek failed, error: {}", e);
             return;
         }
 
@@ -86,7 +81,7 @@ impl FileReaderWriter {
             if let Ok(mut ot) = outputs.lock() {
                 ot.output(&pod.output, &encode_message(&pod, bf.as_str()))
             }
-            db::incr_offset(&pod.uuid, cur_size as i64);
+            db::incr_offset(&pod.path, cur_size as i64);
             bf.clear();
 
             offset += cur_size as i64;
@@ -111,16 +106,16 @@ impl FileReaderWriter {
                                 &encode_message(&thread_pod, bf.as_str()),
                             )
                         }
-                        db::incr_offset(&thread_pod.uuid, incr_offset as i64);
+                        db::incr_offset(&thread_pod.path, incr_offset as i64);
                         bf.clear();
                     }
                 };
             }
         });
 
-        self.file_handles.insert(pod.uuid.to_string(), tx);
+        self.file_handles.insert(pod.path.to_string(), tx);
 
-        db::apply(&pod.set_state_run())
+        db::update(&pod.set_state_run())
     }
 }
 
@@ -136,7 +131,7 @@ fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
              "serviceName":pod.pod,
               "ips":pod.ips,
               "version":"v1.0.0",
-              "path":pod.uuid.to_string(),
+              "path":pod.path.to_string(),
             },
         "message":message}
     )

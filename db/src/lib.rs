@@ -1,29 +1,28 @@
-#[warn(mutable_borrow_reservation_conflict)]
 #[macro_use]
 extern crate lazy_static;
 mod database;
 
 mod pod;
 use database::Message;
+use event::Listener;
 pub use pod::{GetPod, Pod, PodList, PodListMarshaller, State};
 
 pub use database::Event;
-pub(crate) use database::MemDatabase;
+pub(crate) use database::{new_arc_rwlock, MemDatabase, MemDatabaseEventDispatcher};
 
 lazy_static! {
-    static ref MEM_DB: MemDatabase = {
-        let m = MemDatabase::new();
+    static ref MEM: MemDatabase = {
+        let m = MemDatabase::new(new_arc_rwlock(MemDatabaseEventDispatcher::new()));
         m
     };
 }
 
 pub fn incr_offset(uuid: &str, offset: i64) {
-    MEM_DB
-        .tx
+    MEM.tx
         .send(Message {
             event: Event::IncrOffset,
             pod: Pod {
-                uuid: uuid.to_string(),
+                path: uuid.to_string(),
                 last_offset: offset,
                 ..Default::default()
             },
@@ -31,23 +30,30 @@ pub fn incr_offset(uuid: &str, offset: i64) {
         .unwrap()
 }
 
-pub fn apply(pod: &Pod) {
-    MEM_DB
-        .tx
+pub fn update(pod: &Pod) {
+    MEM.tx
         .send(Message {
-            event: Event::Apply,
+            event: Event::Update,
+            pod: pod.clone(),
+        })
+        .unwrap();
+}
+
+pub fn insert(pod: &Pod) {
+    MEM.tx
+        .send(Message {
+            event: Event::Insert,
             pod: pod.clone(),
         })
         .unwrap();
 }
 
 pub fn delete(uuid: &str) {
-    MEM_DB
-        .tx
+    MEM.tx
         .send(Message {
             event: Event::Delete,
             pod: Pod {
-                uuid: uuid.to_string(),
+                path: uuid.to_string(),
                 ..Default::default()
             },
         })
@@ -56,8 +62,7 @@ pub fn delete(uuid: &str) {
 
 pub fn all_to_json() -> String {
     PodListMarshaller(
-        MEM_DB
-            .pods
+        MEM.pods
             .read()
             .unwrap()
             .iter()
@@ -68,8 +73,7 @@ pub fn all_to_json() -> String {
 }
 
 pub fn close() {
-    MEM_DB
-        .tx
+    MEM.tx
         .send(Message {
             event: Event::Close,
             pod: Pod {
@@ -80,7 +84,7 @@ pub fn close() {
 }
 
 pub fn get(uuid: &str) -> Option<Pod> {
-    match MEM_DB.pods.read() {
+    match MEM.pods.read() {
         Ok(pods) => match pods.get(uuid) {
             Some(pod) => Some(pod.clone()),
             None => None,
@@ -90,8 +94,7 @@ pub fn get(uuid: &str) -> Option<Pod> {
 }
 
 pub fn get_slice_with_ns_pod(ns: &str, pod: &str) -> Vec<(String, Pod)> {
-    MEM_DB
-        .pods
+    MEM.pods
         .read()
         .unwrap()
         .iter()
@@ -101,8 +104,7 @@ pub fn get_slice_with_ns_pod(ns: &str, pod: &str) -> Vec<(String, Pod)> {
 }
 
 pub fn delete_with_ns_pod(pod_ns: &str, pod_name: &str) {
-    MEM_DB
-        .tx
+    MEM.tx
         .send(Message {
             event: Event::Delete,
             pod: Pod {
@@ -119,7 +121,7 @@ pub fn pod_upload_stop(ns: &str, pod_name: &str) {
     for (_, mut pod) in res {
         pod.un_upload();
         pod.set_state_stop();
-        apply(&pod);
+        update(&pod);
     }
 }
 
@@ -128,6 +130,30 @@ pub fn pod_upload_start(ns: &str, pod_name: &str) {
     for (_, mut pod) in res {
         pod.upload();
         pod.set_state_run();
-        apply(&pod);
+        update(&pod);
+    }
+}
+
+pub fn registry_open_event_listener<L>(l: L)
+where
+    L: Listener<Pod> + Send + Sync + 'static,
+{
+    match MEM.dispatchers.write() {
+        Ok(mut dispatcher) => dispatcher.registry_open_event_listener(l),
+        Err(e) => {
+            eprintln!("{:?}", e)
+        }
+    }
+}
+
+pub fn registry_close_event_listener<L>(l: L)
+where
+    L: Listener<Pod> + Send + Sync + 'static,
+{
+    match MEM.dispatchers.write() {
+        Ok(mut dispatcher) => dispatcher.registry_close_event_listener(l),
+        Err(e) => {
+            eprintln!("{:?}", e)
+        }
     }
 }

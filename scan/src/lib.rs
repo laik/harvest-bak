@@ -1,7 +1,6 @@
 use common::Result;
 use db::Pod;
 use event::{Dispatch, Listener};
-use log::{error as err, info, warn};
 use notify::{raw_watcher, RawEvent, RecursiveMode, Watcher};
 use std::sync::mpsc::channel;
 use strum::AsRefStr;
@@ -48,7 +47,7 @@ impl GetDebug for PathEventInfo {
 impl PathEventInfo {
     pub fn to_pod(&self) -> Pod {
         Pod {
-            uuid: self.path.clone(),
+            path: self.path.clone(),
             ns: self.namespace.clone(),
             pod: self.pod.clone(),
             container: self.container.clone(),
@@ -80,7 +79,7 @@ impl AutoScanner {
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
         self.event_dispatch
-            .registry(PathEvent::NeedClose.as_ref().to_owned(), l)
+            .registry(PathEvent::NeedClose.as_ref(), l)
     }
 
     pub fn append_write_event_handle<L>(&mut self, l: L)
@@ -88,7 +87,7 @@ impl AutoScanner {
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
         self.event_dispatch
-            .registry(PathEvent::NeedWrite.as_ref().to_owned(), l)
+            .registry(PathEvent::NeedWrite.as_ref(), l)
     }
 
     pub fn append_open_event_handle<L>(&mut self, l: L)
@@ -96,20 +95,20 @@ impl AutoScanner {
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
         self.event_dispatch
-            .registry(PathEvent::NeedOpen.as_ref().to_owned(), l)
+            .registry(PathEvent::NeedOpen.as_ref(), l)
     }
 
     fn dispatch_open_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
-            .dispatch(PathEvent::NeedOpen.as_ref().to_string(), pei)
+            .dispatch(PathEvent::NeedOpen.as_ref(), pei)
     }
     fn dispatch_write_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
-            .dispatch(PathEvent::NeedWrite.as_ref().to_string(), pei)
+            .dispatch(PathEvent::NeedWrite.as_ref(), pei)
     }
     fn dispatch_close_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
-            .dispatch(PathEvent::NeedClose.as_ref().to_string(), pei)
+            .dispatch(PathEvent::NeedClose.as_ref(), pei)
     }
     // TODO
     // the path eg:
@@ -156,7 +155,7 @@ impl AutoScanner {
     }
 
     pub fn prepare_scan(&self) -> Result<Vec<PathEventInfo>> {
-        info!("🔧 harvest auto_scanner start prepare_scanner!!!");
+        println!("🔧 harvest auto_scanner start prepare_scanner!!!");
         let mut result = vec![];
         for entry in WalkDir::new(self.dir.clone()) {
             let entry = entry?;
@@ -173,7 +172,7 @@ impl AutoScanner {
     }
 
     pub fn directory_watch_start(&mut self) -> Result<()> {
-        info!("🔧 harvest auto_scanner start");
+        println!("🔧 harvest auto_scanner start");
         // Create a channel to receive the events.
         let (tx, rx) = channel();
 
@@ -192,14 +191,14 @@ impl AutoScanner {
         }) = rx.recv()
         {
             let path = path.to_str().unwrap();
-            info!("recv event {:?} path: {:?}", op, path);
+            println!("recv event {:?} path: {:?}", op, path);
 
             match op {
                 notify::Op::CREATE => {
                     match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
                         Some(ref pei) => self.dispatch_open_event(pei),
                         _ => {
-                            warn!("notfiy op not handle event create");
+                            println!("notfiy op not handle event create");
                         }
                     }
                 }
@@ -207,7 +206,7 @@ impl AutoScanner {
                     match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
                         Some(ref pei) => self.dispatch_write_event(pei),
                         _ => {
-                            warn!("notfiy op not handle event write");
+                            println!("notfiy op not handle event write");
                         }
                     }
                 }
@@ -215,7 +214,7 @@ impl AutoScanner {
                     match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
                         Some(ref pei) => self.dispatch_close_event(pei),
                         _ => {
-                            warn!("notfiy op not handle event remove");
+                            println!("notfiy op not handle event remove");
                         }
                     }
                 }
@@ -227,7 +226,7 @@ impl AutoScanner {
                                 self.dispatch_write_event(pei)
                             }
                             _ => {
-                                warn!("notfiy op not handle event create|write");
+                                println!("notfiy op not handle event create|write");
                             }
                         }
                         continue;
@@ -239,12 +238,12 @@ impl AutoScanner {
                         match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
                             Some(ref pei) => self.dispatch_close_event(pei),
                             _ => {
-                                warn!("notfiy op not handle event remove|all");
+                                println!("notfiy op not handle event remove|all");
                             }
                         }
                         continue;
                     }
-                    info!("unhandled event {:?} {:?} ({:?})", op, path, cookie);
+                    println!("unhandled event {:?} {:?} ({:?})", op, path, cookie);
                 }
             }
         }
