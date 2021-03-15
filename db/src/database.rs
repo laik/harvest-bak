@@ -1,15 +1,10 @@
-use super::Pod;
+use super::{new_arc_rwlock, Pod};
 use crossbeam_channel::{unbounded, Sender};
 use event::{Dispatch, Listener};
-use log::error as err;
 use std::sync::RwLock;
 use std::thread;
 use std::{collections::HashMap, sync::Arc};
 use strum::AsRefStr;
-
-pub(crate) fn new_arc_rwlock<T>(t: T) -> Arc<RwLock<T>> {
-    Arc::new(RwLock::new(t))
-}
 
 #[derive(AsRefStr, Debug, Clone)]
 pub enum Event {
@@ -102,7 +97,7 @@ impl MemDatabase {
                 let mut m = match t_hm.write() {
                     Ok(m) => m,
                     Err(e) => {
-                        err!("MemDatabase thread write hm failed, error:{:?}", e);
+                        eprintln!("MemDatabase thread write hm failed, error:{:?}", e);
                         continue;
                     }
                 };

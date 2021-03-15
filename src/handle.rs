@@ -1,3 +1,4 @@
+use crate::GetTask;
 use db::GetPod;
 use event::Listener;
 use file::FileReaderWriter;
@@ -22,7 +23,6 @@ where
         }
     }
 }
-
 
 pub(crate) struct DBCloseEvent(pub Arc<Mutex<FileReaderWriter>>);
 impl<T> Listener<T> for DBCloseEvent
@@ -77,5 +77,39 @@ where
         let mut pod = t.get().to_pod();
         pod.set_state_stop();
         db::update(&pod);
+    }
+}
+
+pub(crate) struct TaskRunEvent(pub Arc<Mutex<FileReaderWriter>>);
+impl<T> Listener<T> for TaskRunEvent
+where
+    T: Clone + GetTask,
+{
+    fn handle(&self, t: T) {
+        let task = t.get();
+        let mut pod = task.pod.clone();
+        match self.0.lock() {
+            Ok(mut frw) => frw.open_event(&mut pod),
+            Err(e) => {
+                eprintln!("{:?}", e);
+            }
+        }
+    }
+}
+
+pub(crate) struct TaskStopEvent(pub Arc<Mutex<FileReaderWriter>>);
+impl<T> Listener<T> for TaskStopEvent
+where
+    T: Clone + GetTask,
+{
+    fn handle(&self, t: T) {
+        let task = t.get();
+        let mut pod = task.pod.clone();
+        match self.0.lock() {
+            Ok(mut frw) => frw.close_event(&mut pod),
+            Err(e) => {
+                eprintln!("{:?}", e);
+            }
+        }
     }
 }

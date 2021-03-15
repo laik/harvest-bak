@@ -1,5 +1,11 @@
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+use std::sync::{Arc, RwLock};
+
 use serde_json::Value;
+
+pub fn new_arc_rwlock<T>(t: T) -> Arc<RwLock<T>> {
+    Arc::new(RwLock::new(t))
+}
 
 #[derive(Debug)]
 pub enum Item {

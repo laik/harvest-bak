@@ -42,8 +42,13 @@ impl<'a> Harvest<'a> {
             scan.append_close_event_handle(ScannerCloseEvent());
         }
 
+        // registry db open/close events
         db::registry_open_event_listener(DBOpenEvent(frw.clone()));
         db::registry_close_event_listener(DBCloseEvent(frw.clone()));
+
+        // registry task run/stop event handle
+        registry_task_run_event_listener(TaskRunEvent(frw.clone()));
+        registry_task_stop_event_listener(TaskStopEvent(frw.clone()));
 
         let mut threads = vec![];
         // start auto scanner with a new thread

@@ -7,8 +7,9 @@ use database::Message;
 use event::Listener;
 pub use pod::{GetPod, Pod, PodList, PodListMarshaller, State};
 
+pub use common::new_arc_rwlock;
 pub use database::Event;
-pub(crate) use database::{new_arc_rwlock, MemDatabase, MemDatabaseEventDispatcher};
+pub(crate) use database::{MemDatabase, MemDatabaseEventDispatcher};
 
 lazy_static! {
     static ref MEM: MemDatabase = {

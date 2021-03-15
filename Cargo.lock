@@ -246,7 +246,6 @@ dependencies = [
  "crossbeam-channel",
  "event",
  "lazy_static",
- "log 0.4.14",
  "serde",
  "serde_json",
  "strum",
@@ -429,6 +428,7 @@ dependencies = [
  "serde_json",
  "sse-client",
  "structopt",
+ "strum",
 ]
 
 [[package]]

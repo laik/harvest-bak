@@ -12,12 +12,15 @@ mod handle;
 mod server;
 
 use db::Pod;
+use event::{Dispatch, Listener};
 pub use serde_json;
 
 pub(crate) use api::*;
-pub use common::Result;
+
+pub use common::{new_arc_rwlock, Result};
 pub(crate) use handle::{
     DBCloseEvent, DBOpenEvent, ScannerCloseEvent, ScannerOpenEvent, ScannerWriteEvent,
+    TaskRunEvent, TaskStopEvent,
 };
 pub use server::Harvest;
 
@@ -25,13 +28,7 @@ use crossbeam_channel::{unbounded, Sender};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 use std::{collections::HashMap, thread};
-
-lazy_static! {
-    static ref TASKS: TaskStorage = {
-        let task_storage = TaskStorage::new();
-        task_storage
-    };
-}
+use strum::AsRefStr;
 
 type TaskList = Vec<(String, Task)>;
 
@@ -47,9 +44,19 @@ impl TaskListMarshaller {
     }
 }
 
+pub(crate) trait GetTask {
+    fn get(&self) -> &Task;
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct Task {
     pod: Pod,
+}
+
+impl GetTask for Task {
+    fn get(&self) -> &Task {
+        self
+    }
 }
 
 impl<'a> From<RequestPod<'a>> for Task {
@@ -84,19 +91,68 @@ enum TaskMessage {
     Stop(Task),
     Close,
 }
+#[derive(AsRefStr, Debug, Clone)]
+pub enum TaskStorageListenerEvent {
+    #[strum(serialize = "run")]
+    RUN,
+    #[strum(serialize = "stop")]
+    STOP,
+}
 
+pub struct TaskStorageEventDispatcher {
+    dispatchers: Dispatch<Task>,
+}
+
+impl TaskStorageEventDispatcher {
+    pub(crate) fn new() -> Self {
+        Self {
+            dispatchers: Dispatch::<Task>::new(),
+        }
+    }
+
+    pub(crate) fn registry_run_event_listener<L>(&mut self, l: L)
+    where
+        L: Listener<Task> + Send + Sync + 'static,
+    {
+        self.dispatchers
+            .registry(TaskStorageListenerEvent::RUN.as_ref(), l)
+    }
+
+    pub(crate) fn registry_stop_event_listener<L>(&mut self, l: L)
+    where
+        L: Listener<Task> + Send + Sync + 'static,
+    {
+        self.dispatchers
+            .registry(TaskStorageListenerEvent::STOP.as_ref(), l)
+    }
+
+    pub(crate) fn dispatch_run_event(&mut self, task: &Task) {
+        self.dispatchers
+            .dispatch(TaskStorageListenerEvent::STOP.as_ref(), task)
+    }
+
+    pub(crate) fn dispatch_stop_event(&mut self, task: &Task) {
+        self.dispatchers
+            .dispatch(TaskStorageListenerEvent::STOP.as_ref(), task)
+    }
+}
+
+// pub (crate) struct TaskListener
 pub(crate) struct TaskStorage {
     data: Arc<RwLock<HashMap<String, Task>>>,
     // internal event send queue
     tx: Sender<TaskMessage>,
+    // internal event dispatcher
+    dispatchers: Arc<RwLock<TaskStorageEventDispatcher>>,
 }
 
 impl TaskStorage {
-    pub fn new() -> Self {
+    pub fn new(dispatchers: Arc<RwLock<TaskStorageEventDispatcher>>) -> Self {
         let data = Arc::new(RwLock::new(HashMap::<String, Task>::new()));
         let (tx, rx) = unbounded::<TaskMessage>();
 
         let thread_tasks = Arc::clone(&data);
+        let t_dispatchers = Arc::clone(&dispatchers);
         thread::spawn(move || {
             while let Ok(task_message) = rx.recv() {
                 match task_message {
@@ -112,7 +168,14 @@ impl TaskStorage {
                             }
                         };
                         task.pod.upload();
-                        tasks.entry(task.pod.pod_name.clone()).or_insert(task);
+                        tasks
+                            .entry(task.pod.pod_name.clone())
+                            .or_insert(task.clone());
+
+                        match t_dispatchers.write() {
+                            Ok(mut dispatch) => dispatch.dispatch_run_event(&task),
+                            Err(e) => eprintln!("{}", e),
+                        }
                     }
                     TaskMessage::Stop(mut task) => {
                         let mut tasks = match thread_tasks.write() {
@@ -123,13 +186,30 @@ impl TaskStorage {
                             }
                         };
                         task.pod.un_upload();
-                        tasks.entry(task.pod.pod_name.clone()).or_insert(task);
+                        tasks
+                            .entry(task.pod.pod_name.clone())
+                            .or_insert(task.clone());
+                        match t_dispatchers.write() {
+                            Ok(mut dispatch) => dispatch.dispatch_stop_event(&task),
+                            Err(e) => eprintln!("{}", e),
+                        }
                     }
                 }
             }
         });
-        Self { data, tx }
+        Self {
+            data,
+            tx,
+            dispatchers,
+        }
     }
+}
+
+lazy_static! {
+    static ref TASKS: TaskStorage = {
+        let task_storage = TaskStorage::new(new_arc_rwlock(TaskStorageEventDispatcher::new()));
+        task_storage
+    };
 }
 
 pub(crate) fn run_task(task: &Task) {
@@ -154,6 +234,26 @@ pub(crate) fn tasks_json() -> String {
         return TaskListMarshaller(task_list).to_json();
     }
     "".to_string()
+}
+
+pub(crate) fn registry_task_run_event_listener<L>(l: L)
+where
+    L: Listener<Task> + Send + Sync + 'static,
+{
+    match TASKS.dispatchers.write() {
+        Ok(mut dispatcher) => dispatcher.registry_run_event_listener(l),
+        Err(e) => eprintln!("{}", e),
+    }
+}
+
+pub(crate) fn registry_task_stop_event_listener<L>(l: L)
+where
+    L: Listener<Task> + Send + Sync + 'static,
+{
+    match TASKS.dispatchers.write() {
+        Ok(mut dispatcher) => dispatcher.registry_stop_event_listener(l),
+        Err(e) => eprintln!("{}", e),
+    }
 }
 
 pub(crate) fn get_pod_task(pod_name: &str) -> Option<Task> {
