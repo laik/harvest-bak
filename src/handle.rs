@@ -35,7 +35,7 @@ where
             _ => return,
         };
         match self.0.lock() {
-            Ok(mut frw) => frw.close_event(&mut pod),
+            Ok(mut frw) => frw.remove_event(&mut pod),
             Err(e) => {
                 eprintln!("{:?}", e);
             }

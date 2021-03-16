@@ -33,6 +33,15 @@ impl FileReaderWriter {
                 eprintln!("frw send close to {:?} handle error: {:?}", &pod.path, e);
             }
             self.file_handles.remove(&pod.path);
+        }
+    }
+
+    pub fn remove_event(&mut self, pod: &Pod) {
+        if let Some(tx) = self.file_handles.get(&pod.path) {
+            if let Err(e) = tx.send(SendFileEvent::Close) {
+                eprintln!("frw send remove to {:?} handle error: {:?}", &pod.path, e);
+            }
+            self.file_handles.remove(&pod.path);
         };
 
         db::delete(&pod.path);
