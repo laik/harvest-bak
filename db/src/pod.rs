@@ -38,7 +38,7 @@ impl Pod {
         self
     }
 
-    pub fn is_upload(&mut self) -> bool {
+    pub fn is_upload(&self) -> bool {
         self.is_upload == true
     }
 
@@ -54,8 +54,11 @@ impl Pod {
 
     pub fn merge(&mut self, other: &Pod) -> &mut Self {
         self.is_upload = other.is_upload;
-        self.filter = other.clone().filter;
-        self.output = other.clone().output;
+        self.filter = other.filter.clone();
+        self.output = other.output.clone();
+        self.offset = other.offset.clone();
+        self.node_name = other.node_name.clone();
+        self.ips = self.ips.clone();
         self
     }
 

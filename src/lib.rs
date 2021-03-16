@@ -19,7 +19,7 @@ pub(crate) use api::*;
 
 pub use common::{new_arc_rwlock, Result};
 pub(crate) use handle::{
-    DBCloseEvent, DBOpenEvent, ScannerCloseEvent, ScannerOpenEvent, ScannerWriteEvent,
+    DBCloseEvent, DBOpenEvent, ScannerCloseEvent, ScannerCreateEvent, ScannerWriteEvent,
     TaskRunEvent, TaskStopEvent,
 };
 pub use server::Harvest;
@@ -128,7 +128,7 @@ impl TaskStorageEventDispatcher {
 
     pub(crate) fn dispatch_run_event(&mut self, task: &Task) {
         self.dispatchers
-            .dispatch(TaskStorageListenerEvent::STOP.as_ref(), task)
+            .dispatch(TaskStorageListenerEvent::RUN.as_ref(), task)
     }
 
     pub(crate) fn dispatch_stop_event(&mut self, task: &Task) {
@@ -167,14 +167,21 @@ impl TaskStorage {
                                 continue;
                             }
                         };
-                        task.pod.upload();
-                        tasks
-                            .entry(task.pod.pod_name.clone())
-                            .or_insert(task.clone());
+                        for (_, mut pod) in
+                            db::get_slice_with_ns_pod(&task.pod.ns, &task.pod.pod_name)
+                        {
+                            pod.merge_with(&task.pod);
+                            pod.upload();
+                            pod.set_state_run();
 
-                        match t_dispatchers.write() {
-                            Ok(mut dispatch) => dispatch.dispatch_run_event(&task),
-                            Err(e) => eprintln!("{}", e),
+                            task.pod = pod;
+                            tasks
+                                .entry(task.pod.pod_name.clone())
+                                .or_insert(task.clone());
+                            match t_dispatchers.write() {
+                                Ok(mut dispatch) => dispatch.dispatch_run_event(&task),
+                                Err(e) => eprintln!("{}", e),
+                            }
                         }
                     }
                     TaskMessage::Stop(mut task) => {
@@ -185,13 +192,19 @@ impl TaskStorage {
                                 continue;
                             }
                         };
-                        task.pod.un_upload();
-                        tasks
-                            .entry(task.pod.pod_name.clone())
-                            .or_insert(task.clone());
-                        match t_dispatchers.write() {
-                            Ok(mut dispatch) => dispatch.dispatch_stop_event(&task),
-                            Err(e) => eprintln!("{}", e),
+                        for (_, mut pod) in
+                            db::get_slice_with_ns_pod(&task.pod.ns, &task.pod.pod_name)
+                        {
+                            pod.un_upload();
+                            pod.set_state_stop();
+                            task.pod = pod;
+                            tasks
+                                .entry(task.pod.pod_name.clone())
+                                .or_insert(task.clone());
+                            match t_dispatchers.write() {
+                                Ok(mut dispatch) => dispatch.dispatch_stop_event(&task),
+                                Err(e) => eprintln!("{}", e),
+                            }
                         }
                     }
                 }

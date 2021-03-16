@@ -8,12 +8,12 @@ use walkdir::WalkDir;
 
 #[derive(Debug, AsRefStr, Clone)]
 pub enum PathEvent {
-    #[strum(serialize = "NeedOpen")]
-    NeedOpen,
-    #[strum(serialize = "NeedClose")]
-    NeedClose,
-    #[strum(serialize = "NeedWrite")]
-    NeedWrite,
+    #[strum(serialize = "create")]
+    Create,
+    #[strum(serialize = "remove")]
+    Remove,
+    #[strum(serialize = "write")]
+    Write,
 }
 
 pub trait GetPathEventInfo {
@@ -79,7 +79,7 @@ impl AutoScanner {
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
         self.event_dispatch
-            .registry(PathEvent::NeedClose.as_ref(), l)
+            .registry(PathEvent::Remove.as_ref(), l)
     }
 
     pub fn append_write_event_handle<L>(&mut self, l: L)
@@ -87,28 +87,28 @@ impl AutoScanner {
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
         self.event_dispatch
-            .registry(PathEvent::NeedWrite.as_ref(), l)
+            .registry(PathEvent::Write.as_ref(), l)
     }
 
-    pub fn append_open_event_handle<L>(&mut self, l: L)
+    pub fn append_create_event_handle<L>(&mut self, l: L)
     where
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
         self.event_dispatch
-            .registry(PathEvent::NeedOpen.as_ref(), l)
+            .registry(PathEvent::Create.as_ref(), l)
     }
 
-    fn dispatch_open_event(&mut self, pei: &PathEventInfo) {
+    fn dispatch_create_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
-            .dispatch(PathEvent::NeedOpen.as_ref(), pei)
+            .dispatch(PathEvent::Create.as_ref(), pei)
     }
     fn dispatch_write_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
-            .dispatch(PathEvent::NeedWrite.as_ref(), pei)
+            .dispatch(PathEvent::Write.as_ref(), pei)
     }
     fn dispatch_close_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
-            .dispatch(PathEvent::NeedClose.as_ref(), pei)
+            .dispatch(PathEvent::Remove.as_ref(), pei)
     }
     // TODO
     // the path eg:
@@ -196,7 +196,7 @@ impl AutoScanner {
             match op {
                 notify::Op::CREATE => {
                     match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
-                        Some(ref pei) => self.dispatch_open_event(pei),
+                        Some(ref pei) => self.dispatch_create_event(pei),
                         _ => {
                             println!("notfiy op not handle event create");
                         }
@@ -222,7 +222,7 @@ impl AutoScanner {
                     if op == notify::Op::CREATE | notify::Op::WRITE {
                         match Self::parse_path_to_pei(&self.namespace, &self.dir, &path) {
                             Some(ref pei) => {
-                                self.dispatch_open_event(pei);
+                                self.dispatch_create_event(pei);
                                 self.dispatch_write_event(pei)
                             }
                             _ => {
@@ -230,8 +230,7 @@ impl AutoScanner {
                             }
                         }
                         continue;
-                    } else if op == notify::Op::CLOSE_WRITE
-                        || op == notify::Op::CREATE | notify::Op::REMOVE | notify::Op::WRITE
+                    } else if op == notify::Op::CREATE | notify::Op::REMOVE | notify::Op::WRITE
                         || op == notify::Op::CREATE | notify::Op::REMOVE
                         || op == notify::Op::REMOVE | notify::Op::WRITE
                     {
@@ -275,8 +274,8 @@ mod tests {
 
     #[test]
     fn event_it_works() {
-        assert_eq!(PathEvent::NeedClose.as_ref(), "NeedClose");
-        assert_eq!(PathEvent::NeedOpen.as_ref(), "NeedOpen");
-        assert_eq!(PathEvent::NeedWrite.as_ref(), "NeedWrite");
+        assert_eq!(PathEvent::Remove.as_ref(), "NeedClose");
+        assert_eq!(PathEvent::Create.as_ref(), "NeedOpen");
+        assert_eq!(PathEvent::Write.as_ref(), "NeedWrite");
     }
 }

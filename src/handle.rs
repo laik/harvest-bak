@@ -1,4 +1,4 @@
-use crate::GetTask;
+use crate::{get_pod_task, GetTask};
 use db::GetPod;
 use event::Listener;
 use file::FileReaderWriter;
@@ -43,13 +43,29 @@ where
     }
 }
 
-pub(crate) struct ScannerOpenEvent();
-impl<T> Listener<T> for ScannerOpenEvent
+pub(crate) struct ScannerCreateEvent(pub Arc<Mutex<FileReaderWriter>>);
+impl<T> Listener<T> for ScannerCreateEvent
 where
     T: Clone + GetPathEventInfo,
 {
     fn handle(&self, t: T) {
-        db::insert(&t.get().to_pod())
+        let mut pod = t.get().to_pod();
+        db::insert(&pod);
+
+        match get_pod_task(&pod.pod_name) {
+            Some(t) => {
+                if !t.pod.is_upload() {
+                    return;
+                }
+                match self.0.lock() {
+                    Ok(mut frw) => frw.write_event(&mut pod),
+                    Err(e) => {
+                        eprintln!("{:?}", e);
+                    }
+                }
+            }
+            None => {}
+        }
     }
 }
 

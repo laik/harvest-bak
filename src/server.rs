@@ -37,7 +37,7 @@ impl<'a> Harvest<'a> {
 
         if let Ok(mut scan) = scanner.write() {
             // registry scanner event handle
-            scan.append_open_event_handle(ScannerOpenEvent());
+            scan.append_create_event_handle(ScannerCreateEvent(frw.clone()));
             scan.append_write_event_handle(ScannerWriteEvent(frw.clone()));
             scan.append_close_event_handle(ScannerCloseEvent());
         }
