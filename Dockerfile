@@ -16,7 +16,9 @@ RUN RUSTFLAGS=-Clinker=musl-gcc cargo build --release --target=x86_64-unknown-li
 
 RUN rm -f target/x86_64-unknown-linux-musl/release/deps/harvest*
 
-COPY . .
+ADD . .
+
+# RUN mv config ${HOME}/.cargo/config
 
 RUN RUSTFLAGS=-Clinker=musl-gcc cargo build --release --target=x86_64-unknown-linux-musl
 

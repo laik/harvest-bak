@@ -8,25 +8,23 @@ pub struct ServerOptions {
     #[structopt(short, long)]
     namespace: String,
 
-    // // short and long flags (-s, --server) will be deduced from the field's name
-    #[structopt(short = "o", long)]
-    output: String,
+    // // short and long flags (-s, --api-server) will be deduced from the field's name
+    #[structopt(short = "s", long)]
+    api_server: String,
 
     // short and long flags (-d, --dir) will be deduced from the field's name
     #[structopt(short = "d", long)]
     dir: String,
+
+    // short and long flags (-h, --node) will be deduced from the field's name
+    #[structopt(short = "h", long)]
+    host: String,
 }
-// cargo run -- --namespace xx --path /var/log/container --server http://localhost:9999/
+// cargo run -- --namespace xx --dir /var/log/container --api-server http://localhost:9999/ --host node1
 
 fn main() -> Result<()> {
-    // let opt = ServerOptions::from_args();
-    // println!("{:?}", opt);
+    let opt = ServerOptions::from_args();
+    println!("recv args {:?}", opt);
 
-    Harvest::new(
-        "default".into(),
-        "/Users/dxp/workspace/go/src/github.com/laik/harvest/tmp".into(),
-        "http://localhost:9999/".into(),
-        "node1".into(),
-    )
-    .start(1000)
+    Harvest::new(&opt.namespace, &opt.dir, &opt.api_server, &opt.host).start(1000)
 }
