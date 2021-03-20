@@ -20,7 +20,7 @@ pub struct ServerOptions {
     #[structopt(short = "h", long)]
     host: String,
 }
-// cargo run -- --namespace xx --dir /var/log/container --api-server http://localhost:9999/ --host node1
+// cargo run -- --namespace default --dir /var/log/container --api-server http://localhost:9999/ --host node1
 
 fn main() -> Result<()> {
     let opt = ServerOptions::from_args();

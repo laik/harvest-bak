@@ -78,24 +78,21 @@ impl AutoScanner {
     where
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
-        self.event_dispatch
-            .registry(PathEvent::Remove.as_ref(), l)
+        self.event_dispatch.registry(PathEvent::Remove.as_ref(), l)
     }
 
     pub fn append_write_event_handle<L>(&mut self, l: L)
     where
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
-        self.event_dispatch
-            .registry(PathEvent::Write.as_ref(), l)
+        self.event_dispatch.registry(PathEvent::Write.as_ref(), l)
     }
 
     pub fn append_create_event_handle<L>(&mut self, l: L)
     where
         L: Listener<PathEventInfo> + Send + Sync + 'static,
     {
-        self.event_dispatch
-            .registry(PathEvent::Create.as_ref(), l)
+        self.event_dispatch.registry(PathEvent::Create.as_ref(), l)
     }
 
     fn dispatch_create_event(&mut self, pei: &PathEventInfo) {
@@ -103,8 +100,7 @@ impl AutoScanner {
             .dispatch(PathEvent::Create.as_ref(), pei)
     }
     fn dispatch_write_event(&mut self, pei: &PathEventInfo) {
-        self.event_dispatch
-            .dispatch(PathEvent::Write.as_ref(), pei)
+        self.event_dispatch.dispatch(PathEvent::Write.as_ref(), pei)
     }
     fn dispatch_close_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
@@ -112,7 +108,7 @@ impl AutoScanner {
     }
     // TODO
     // the path eg:
-    // /var/log/pod
+    // /var/log/pods
     //default_mysql-apollo-slave-0_49d0b6e1-9980-4f7b-b1eb-3eab3e753b48
     // └── mysql
     //     ├── 4.log -> /data/docker/containers/1707c92da3df11616bd8eb15bf1c8e60105e5276b62acba3c0aa12e3d0f03df5/1707c92da3df11616bd8eb15bf1c8e60105e5276b62acba3c0aa12e3d0f03df5-json.log
@@ -159,7 +155,7 @@ impl AutoScanner {
         let mut result = vec![];
         for entry in WalkDir::new(self.dir.clone()) {
             let entry = entry?;
-            if !entry.path().is_file() {
+            if !entry.file_type().is_symlink() { //TODO this is symlink
                 continue;
             }
             if let Some(pei) =
