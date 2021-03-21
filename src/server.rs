@@ -1,4 +1,5 @@
 use super::*;
+use common::new_arc_mutex;
 use file::FileReaderWriter;
 use rocket::config::{Config, Environment};
 use rocket::routes;
@@ -9,31 +10,32 @@ use std::thread;
 pub struct Harvest<'a> {
     node_name: &'a str,
     namespace: &'a str,
-    dir: &'a str,
+    docker_dir: &'a str,
     api_server_addr: &'a str,
 }
 
 impl<'a> Harvest<'a> {
     pub fn new(
         namespace: &'a str,
-        dir: &'a str,
+        docker_dir: &'a str,
         api_server_addr: &'a str,
         node_name: &'a str,
     ) -> Self {
         Self {
             namespace,
-            dir,
+            docker_dir,
             node_name,
             api_server_addr,
         }
     }
 
     pub fn start(&mut self, num_workers: usize) -> Result<()> {
-        let scanner = Arc::new(RwLock::new(AutoScanner::new(
+        let scanner = new_arc_rwlock(AutoScanner::new(
             String::from(self.namespace),
-            String::from(self.dir),
-        )));
-        let frw = Arc::new(Mutex::new(FileReaderWriter::new(num_workers)));
+            String::from(self.docker_dir),
+        ));
+
+        let frw = new_arc_mutex(FileReaderWriter::new(num_workers));
 
         if let Ok(mut scan) = scanner.write() {
             // registry scanner event handle
@@ -61,7 +63,7 @@ impl<'a> Harvest<'a> {
                 }
             };
 
-            let res = match scan.prepare_scan() {
+            let res = match scan.prepare() {
                 Ok(it) => it,
                 Err(e) => {
                     eprintln!("{}", e);
@@ -74,8 +76,8 @@ impl<'a> Harvest<'a> {
                 db::insert(&item.to_pod())
             }
 
-            if let Err(e) = scan.directory_watch_start() {
-                eprintln!("{}", e);
+            if let Err(e) = scan.watch_start() {
+                panic!("{:?}", e);
             }
         }));
 

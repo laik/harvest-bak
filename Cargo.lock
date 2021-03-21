@@ -1032,6 +1032,9 @@ dependencies = [
  "db",
  "event",
  "notify",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "strum",
  "walkdir",
 ]
