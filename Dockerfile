@@ -1,4 +1,4 @@
-FROM rust:nightly as cargo-build
+FROM rustlang/rust:nightly-stretch as cargo-build
 
 RUN apt-get update
 
