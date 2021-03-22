@@ -1,4 +1,4 @@
-FROM rust:latest as cargo-build
+FROM rust:nightly as cargo-build
 
 RUN apt-get update
 
