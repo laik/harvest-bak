@@ -26,5 +26,5 @@ fn main() -> Result<()> {
     let opt = ServerOptions::from_args();
     println!("recv args {:?}", opt);
 
-    Harvest::new(&opt.namespace, &opt.docker_dir, &opt.api_server, &opt.host).start(1000)
+    Harvest::new(&opt.namespace, &opt.docker_dir, &opt.api_server, &opt.host).start(16)
 }

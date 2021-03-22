@@ -17,13 +17,15 @@ pub enum SendFileEvent {
 pub struct FileReaderWriter {
     threads: ThreadPool,
     file_handles: HashMap<String, Sender<SendFileEvent>>,
+    num_workers: usize,
 }
 
 impl FileReaderWriter {
     pub fn new(num_workers: usize) -> Self {
         Self {
-            threads: ThreadPool::with_name("FileReaderWriter".into(), num_workers),
+            threads: ThreadPool::with_name("frw".into(), num_workers),
             file_handles: HashMap::new(),
+            num_workers,
         }
     }
 
@@ -123,6 +125,14 @@ impl FileReaderWriter {
         });
 
         self.file_handles.insert(pod.path.to_string(), tx);
+
+        if self.threads.active_count() >= self.num_workers {
+            self.num_workers *= 2;
+            self.threads.set_num_threads(self.num_workers);
+        } else if self.threads.active_count() < (self.num_workers / 2) {
+            self.num_workers /= 2;
+            self.threads.set_num_threads(self.num_workers);
+        }
 
         db::update(&pod.set_state_run())
     }
