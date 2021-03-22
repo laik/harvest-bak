@@ -16,7 +16,7 @@ pub(crate) fn recv_tasks(addr: &str, node_name: &str) {
         }
     };
 
-    println!("🚀 start watch to api server !!!");
+    println!("🚀 🚀 🚀 🚀 🚀");
 
     for event in event_sources.receiver().iter() {
         println!("recv task {:?}", event);
@@ -40,7 +40,7 @@ pub(crate) fn recv_tasks(addr: &str, node_name: &str) {
             } else if request.op == STOP {
                 stop_task(&task);
             } else {
-                println!("recv api server unknow event: {:?}", request)
+                println!("recv api server unknown event: {:?}", request)
             }
         }
     }
@@ -107,7 +107,6 @@ pub(crate) fn query_tasks() -> JsonValue {
     json!(tasks_json())
 }
 
-// /pod/collect list ns.pod start collect to output
 #[post("/pod", format = "json", data = "<req>")]
 pub(crate) fn post_pod(req: Json<Request>) -> JsonValue {
     if req.0.namespace == "" || req.0.pod == "" {
@@ -128,7 +127,7 @@ pub(crate) fn post_pod(req: Json<Request>) -> JsonValue {
     json!({"status":"ok"})
 }
 
-#[get("/pod")]
+#[get("/pods")]
 pub(crate) fn query_pod() -> JsonValue {
     json!(db::all_to_json())
 }

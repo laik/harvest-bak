@@ -3,7 +3,6 @@ use db::Pod;
 use event::{Dispatch, Listener};
 use notify::{raw_watcher, RawEvent, RecursiveMode, Watcher};
 use std::collections::{hash_map::DefaultHasher, HashMap};
-use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, RwLock};
@@ -86,7 +85,7 @@ enum DockerConfigFileType {
     Unknow,
 }
 
-fn docker_file_type(path: &str) -> DockerConfigFileType {
+fn docker_config_file_type(path: &str) -> DockerConfigFileType {
     if path.ends_with(".log") {
         return DockerConfigFileType::Log;
     } else if path.ends_with("config.v2.json") {
@@ -125,18 +124,6 @@ impl AutoScanner {
         hasher.finish() as usize
     }
 
-    fn contains_key(&self, k: &str) -> bool {
-        let cache = self.cache.clone();
-        let reader = cache[(self.hash(k) % cache.len()) as usize].write();
-        match reader {
-            Ok(r) => r.contains_key(k),
-            Err(e) => {
-                eprintln!("cache contains_key {:?} failed: {:?}", k, e);
-                false
-            }
-        }
-    }
-
     fn remove(&self, k: &str) {
         let cache = self.cache.clone();
         let writer = cache[(self.hash(k) % cache.len()) as usize].write();
@@ -151,6 +138,9 @@ impl AutoScanner {
     }
 
     fn insert(&self, k: &str, v: JSONConfig) {
+        if self.namespace != v.get_ns() {
+            return;
+        }
         let cache = self.cache.clone();
         let writer = cache[(self.hash(k) % cache.len()) as usize].write();
         match writer {
@@ -216,9 +206,11 @@ impl AutoScanner {
         self.event_dispatch
             .dispatch(PathEvent::Create.as_ref(), pei)
     }
+
     fn dispatch_write_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch.dispatch(PathEvent::Write.as_ref(), pei)
     }
+
     fn dispatch_close_event(&mut self, pei: &PathEventInfo) {
         self.event_dispatch
             .dispatch(PathEvent::Remove.as_ref(), pei)
@@ -251,7 +243,7 @@ impl AutoScanner {
         for entry in WalkDir::new(self.docker_dir.clone()) {
             let entry = entry?;
             let path = entry.path().to_str().unwrap();
-            match docker_file_type(path) {
+            match docker_config_file_type(path) {
                 DockerConfigFileType::ConfigV2 => self.insert_config_file(path),
                 DockerConfigFileType::Log => self.insert_key(path),
                 _ => {}
@@ -294,16 +286,8 @@ impl AutoScanner {
         }) = rx.recv()
         {
             let path = path.to_str().unwrap();
-            println!("recv event {:?} path: {:?}", op, path);
-
-            match docker_file_type(path) {
-                DockerConfigFileType::ConfigV2 => {}
-                DockerConfigFileType::Log => {}
-                _ => continue,
-            }
-
             match op {
-                notify::Op::CREATE => match docker_file_type(path) {
+                notify::Op::CREATE => match docker_config_file_type(path) {
                     DockerConfigFileType::ConfigV2 => self.insert(path, JSONConfig::from(path)),
                     DockerConfigFileType::Log => match self.get(path) {
                         Some(cfg) => {
@@ -320,7 +304,7 @@ impl AutoScanner {
                     },
                     _ => continue,
                 },
-                notify::Op::WRITE => match docker_file_type(path) {
+                notify::Op::WRITE => match docker_config_file_type(path) {
                     DockerConfigFileType::ConfigV2 => self.insert(path, JSONConfig::from(path)),
                     DockerConfigFileType::Log => self.dispatch_write_event(&PathEventInfo {
                         path: path.to_string(),
@@ -328,7 +312,7 @@ impl AutoScanner {
                     }),
                     _ => continue,
                 },
-                notify::Op::REMOVE => match docker_file_type(path) {
+                notify::Op::REMOVE => match docker_config_file_type(path) {
                     DockerConfigFileType::ConfigV2 => self.remove(path),
                     DockerConfigFileType::Log => self.dispatch_write_event(&PathEventInfo {
                         path: path.to_string(),
@@ -338,7 +322,7 @@ impl AutoScanner {
                 },
                 _ => {
                     if op == notify::Op::CREATE | notify::Op::WRITE {
-                        match docker_file_type(path) {
+                        match docker_config_file_type(path) {
                             DockerConfigFileType::ConfigV2 => {
                                 self.insert(path, JSONConfig::from(path))
                             }
@@ -363,23 +347,16 @@ impl AutoScanner {
                         || op == notify::Op::CREATE | notify::Op::REMOVE
                         || op == notify::Op::REMOVE | notify::Op::WRITE
                     {
-                        match docker_file_type(path) {
+                        match docker_config_file_type(path) {
                             DockerConfigFileType::ConfigV2 => {
                                 self.remove(path);
                             }
-                            DockerConfigFileType::Log => match self.get(path) {
-                                Some(cfg) => {
-                                    let pei = Self::config_to_pei(
-                                        &cfg.get_service_name(),
-                                        &cfg.get_ns(),
-                                        &cfg.get_pod_name(),
-                                        &cfg.get_container_name(),
-                                        &cfg.log_path,
-                                    );
-                                    self.dispatch_close_event(&pei)
-                                }
-                                _ => {}
-                            },
+                            DockerConfigFileType::Log => {
+                                self.dispatch_close_event(&PathEventInfo {
+                                    path: path.to_string(),
+                                    ..Default::default()
+                                })
+                            }
                             _ => continue,
                         }
                     }

@@ -4,7 +4,6 @@ use file::FileReaderWriter;
 use rocket::config::{Config, Environment};
 use rocket::routes;
 use scan::AutoScanner;
-use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 pub struct Harvest<'a> {

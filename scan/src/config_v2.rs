@@ -3,7 +3,6 @@ use std::{collections::HashMap, fs::File, io::BufReader};
 const SERVICE_LABEL_NAME: &'static str = "harvest_service_lable";
 const NAMESPACE_LABEL_NAME: &'static str = "io.kubernetes.pod.namespace";
 const PODNAME_LABEL_NAME: &'static str = "io.kubernetes.pod.name";
-const PODUID_LABEL_NAME: &'static str = "io.kubernetes.pod.uid";
 const CONTAINERNAME_LABEL_NAME: &'static str = "io.kubernetes.container.name";
 
 #[derive(Default, Debug, Clone, PartialEq, serde_derive::Serialize, serde_derive::Deserialize)]
@@ -64,13 +63,6 @@ impl JSONConfig {
             if label == "POD" {
                 return self.get_pod_name();
             }
-            return label.to_string();
-        }
-        "".to_string()
-    }
-
-    pub fn get_pod_uid(&self) -> String {
-        if let Some(label) = self.config.labels.get(PODUID_LABEL_NAME) {
             return label.to_string();
         }
         "".to_string()

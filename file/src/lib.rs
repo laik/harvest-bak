@@ -15,14 +15,14 @@ pub enum SendFileEvent {
 }
 
 pub struct FileReaderWriter {
-    threadpool: ThreadPool,
+    threads: ThreadPool,
     file_handles: HashMap<String, Sender<SendFileEvent>>,
 }
 
 impl FileReaderWriter {
     pub fn new(num_workers: usize) -> Self {
         Self {
-            threadpool: ThreadPool::with_name("FileReaderWriter".into(), num_workers),
+            threads: ThreadPool::with_name("FileReaderWriter".into(), num_workers),
             file_handles: HashMap::new(),
         }
     }
@@ -101,7 +101,7 @@ impl FileReaderWriter {
 
         let thread_pod = pod.clone();
         let (tx, rx) = async_channel::<SendFileEvent>();
-        self.threadpool.execute(move || {
+        self.threads.execute(move || {
             while let Ok(evt) = rx.recv() {
                 match evt {
                     SendFileEvent::Close => {
