@@ -101,6 +101,7 @@ impl FileReaderWriter {
             }
         }
 
+        pod.offset = offset;
         let thread_pod = pod.clone();
         let (tx, rx) = async_channel::<SendFileEvent>();
         self.threads.execute(move || {

@@ -1,6 +1,6 @@
 use super::{run_task, stop_task, tasks_json, Task};
-use rocket::{get, post};
-use rocket_contrib::json::{Json, JsonValue};
+use rocket::get;
+use rocket_contrib::json::JsonValue;
 use serde::{Deserialize, Serialize};
 use sse_client::EventSource;
 
@@ -16,16 +16,14 @@ pub(crate) fn recv_tasks(addr: &str, node_name: &str) {
         }
     };
 
-    println!("🚀 🚀 🚀 🚀 🚀");
-
     for event in event_sources.receiver().iter() {
         println!("recv task {:?}", event);
         let request = match serde_json::from_str::<ApiServerRequest>(&event.data) {
             Ok(it) => it,
             Err(e) => {
                 eprintln!(
-                    "recv event parse json error or connect to api server error: {:?}",
-                    e
+                    "recv event parse json error or connect to api server error: {:?} \n data: {:?}",
+                    e, &event.data
                 );
                 continue;
             }
@@ -105,26 +103,6 @@ pub(crate) struct Request {
 #[get("/tasks")]
 pub(crate) fn query_tasks() -> JsonValue {
     json!(tasks_json())
-}
-
-#[post("/pod", format = "json", data = "<req>")]
-pub(crate) fn post_pod(req: Json<Request>) -> JsonValue {
-    if req.0.namespace == "" || req.0.pod == "" {
-        return json!({
-            "status": "error",
-            "reason": format!("namespace {} or pod {} maybe is empty",req.namespace,req.pod),
-        });
-    }
-
-    for (_, pod) in db::get_slice_with_ns_pod(&req.0.namespace, &req.0.pod).iter() {
-        let mut pod = pod.to_owned();
-        pod.is_upload = req.0.upload;
-        pod.filter = req.0.filter.clone();
-        pod.output = req.0.output.clone();
-        db::update(&pod);
-    }
-
-    json!({"status":"ok"})
 }
 
 #[get("/pods")]

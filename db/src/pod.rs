@@ -59,6 +59,7 @@ impl Pod {
         self.offset = other.offset.clone();
         self.node_name = other.node_name.clone();
         self.ips = self.ips.clone();
+        self.state = other.state.clone();
         self
     }
 
