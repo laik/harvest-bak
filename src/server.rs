@@ -81,9 +81,10 @@ impl<'a> Harvest<'a> {
         }));
 
         threads.push(thread::spawn(move || {
-            let cfg = Config::build(Environment::Development)
+            let cfg = Config::build(Environment::Production)
                 .address("0.0.0.0")
                 .port(8080)
+                .secret_key("8Xui8SN4mI+7egV/9dlfYYLGQJeEx4+DwmSQLwDVXJg=")
                 .unwrap();
 
             rocket::custom(cfg)

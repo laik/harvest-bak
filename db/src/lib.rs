@@ -61,7 +61,7 @@ pub fn delete(uuid: &str) {
         .unwrap();
 }
 
-pub fn all_to_json() -> String {
+pub fn all_to_json() -> PodListMarshaller {
     PodListMarshaller(
         MEM.pods
             .read()
@@ -70,7 +70,6 @@ pub fn all_to_json() -> String {
             .map(|(_, v)| v.clone())
             .collect::<Vec<Pod>>(),
     )
-    .to_json()
 }
 
 pub fn close() {

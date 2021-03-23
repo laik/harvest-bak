@@ -67,10 +67,11 @@ impl GetDebug for PathEventInfo {
 impl PathEventInfo {
     pub fn to_pod(&self) -> Pod {
         Pod {
-            path: self.path.clone(),
+            service_name: self.service_name.clone(),
             ns: self.ns.clone(),
             pod_name: self.pod_name.clone(),
             container: self.container_name.clone(),
+            path: self.path.clone(),
             ..Default::default()
         }
     }

@@ -136,6 +136,7 @@ impl MemDatabase {
                     }
                     Event::IncrOffset => {
                         if let Some(inner) = m.get_mut(&pod.path) {
+                            inner.last_offset = pod.last_offset;
                             inner.offset += pod.last_offset
                         };
                     }

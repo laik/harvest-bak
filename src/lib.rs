@@ -30,7 +30,7 @@ use std::sync::{Arc, RwLock};
 use std::{collections::HashMap, thread};
 use strum::AsRefStr;
 
-type TaskList = Vec<(String, Task)>;
+type TaskList = Vec<Task>;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskListMarshaller(TaskList);
@@ -237,16 +237,15 @@ pub(crate) fn task_close() {
     TASKS.tx.send(TaskMessage::Close).unwrap();
 }
 
-pub(crate) fn tasks_json() -> String {
-    if let Ok(tasks) = TASKS.data.read() {
-        let task_list = tasks
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<Vec<(String, Task)>>();
+pub(crate) fn tasks_json() -> TaskListMarshaller {
+    TaskListMarshaller(tasks())
+}
 
-        return TaskListMarshaller(task_list).to_json();
+pub(crate) fn tasks() -> TaskList {
+    if let Ok(tasks) = TASKS.data.read() {
+        return tasks.iter().map(|(_, v)| v.clone()).collect::<Vec<Task>>();
     }
-    "".to_string()
+    vec![]
 }
 
 pub(crate) fn registry_task_run_event_listener<L>(l: L)
