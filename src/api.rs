@@ -112,17 +112,6 @@ pub(crate) fn query_pod() -> JsonValue {
     json!(db::all_to_json())
 }
 
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct OutputRequest {
-//     uri: String,
-// }
-
-// #[post("/output", format = "application/json", data = "<output>")]
-// pub(crate) fn add_output(output: Json<OutputRequest>) -> JsonValue {
-//     println!("recv {:?}", output);
-//     json!({"status":"ok"})
-// }
-
 #[catch(404)]
 pub(crate) fn not_found() -> JsonValue {
     json!({
