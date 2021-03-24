@@ -24,10 +24,11 @@ pub(crate) use handle::{
 };
 pub use server::Harvest;
 
+use async_std::task;
 use crossbeam_channel::{unbounded, Sender};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::{collections::HashMap, thread};
 use strum::AsRefStr;
 
 type TaskList = Vec<Task>;
@@ -153,7 +154,7 @@ impl TaskStorage {
 
         let thread_tasks = Arc::clone(&data);
         let t_dispatchers = Arc::clone(&dispatchers);
-        thread::spawn(move || {
+        task::spawn(async move {
             while let Ok(task_message) = rx.recv() {
                 match task_message {
                     TaskMessage::Close => {
