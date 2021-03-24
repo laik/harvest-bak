@@ -137,10 +137,10 @@ fn encode_message<'a>(pod: &'a Pod, message: &'a str) -> String {
             {
               "nodeId":pod.pod_name,
               "container":pod.container,
-             "serviceName":pod.service_name,
+              "serviceName":pod.service_name,
               "ips":pod.ips,
               "version":"v1.0.0",
-              "path":pod.path.to_string(),
+            //   "path":pod.path.to_string(),
             },
         "message":message}
     )

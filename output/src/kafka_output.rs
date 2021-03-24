@@ -94,7 +94,7 @@ impl KafkaOuput {
             Err(e) => return Err(Box::new(e)),
         };
 
-        let ring_buff = RingBuffer::new(1024);
+        let ring_buff = RingBuffer::new(10240);
         let (p, mut c) = ring_buff.split();
 
         let topic = cfg.topic.clone();
