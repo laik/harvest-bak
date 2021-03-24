@@ -50,7 +50,7 @@ impl FileReaderWriter {
         if self.file_handles.contains_key(&pod.path) {
             return;
         }
-        self._open(pod);
+        self.open(pod);
     }
 
     pub fn write_event(&mut self, pod: &mut Pod) {
@@ -65,7 +65,7 @@ impl FileReaderWriter {
         }
     }
 
-    fn _open(&mut self, pod: &mut Pod) {
+    fn open(&mut self, pod: &mut Pod) {
         let mut offset = pod.offset;
         let mut file = match File::open(&pod.path) {
             Ok(file) => file,

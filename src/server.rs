@@ -28,13 +28,13 @@ impl<'a> Harvest<'a> {
         }
     }
 
-    pub fn start(&mut self, num_workers: usize) -> Result<()> {
+    pub fn start(&mut self) -> Result<()> {
         let scanner = new_arc_rwlock(AutoScanner::new(
             String::from(self.namespace),
             String::from(self.docker_dir),
         ));
 
-        let frw = new_arc_mutex(FileReaderWriter::new(num_workers));
+        let frw = new_arc_mutex(FileReaderWriter::new(0));
 
         if let Ok(mut scan) = scanner.write() {
             // registry scanner event handle
