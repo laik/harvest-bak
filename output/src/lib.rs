@@ -1,4 +1,5 @@
 use common::{Item, Result};
+use kafka_output::KafkaOuput;
 use once_cell::sync::Lazy;
 use std::{
     collections::HashMap,
@@ -6,6 +7,8 @@ use std::{
 };
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod kafka_output;
 
 pub use OUTPUTS as OTS;
 
@@ -18,6 +21,18 @@ pub static OUTPUTS: Lazy<Arc<Mutex<Outputs>>> = Lazy::new(|| {
     outputs
 });
 
+pub fn registry_output(channel: &str) {
+    if !channel.starts_with("kafka") {
+        return;
+    }
+    if let Ok(mut ots) = OUTPUTS.lock() {
+        if ots.contains_output(channel) {
+            return;
+        }
+        ots.registry_output(channel, Output::new(KafkaOuput::new()));
+    }
+}
+
 pub struct Outputs {
     output_listener: HashMap<String, Box<dyn IOutput>>,
 }
@@ -27,6 +42,10 @@ impl Outputs {
         Self {
             output_listener: HashMap::new(),
         }
+    }
+
+    pub fn contains_output(&self, channel: &str) -> bool {
+        self.output_listener.contains_key(channel)
     }
 
     pub fn registry_output<T>(&mut self, channel: &str, t: T)
