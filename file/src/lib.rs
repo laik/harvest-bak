@@ -1,5 +1,6 @@
 #![feature(seek_stream_len)]
 extern crate crossbeam_channel;
+use async_std::task;
 use crossbeam_channel::{unbounded as async_channel, Sender};
 use db::Pod;
 use output::OTS;
@@ -7,7 +8,6 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use threadpool::ThreadPool;
 
 pub enum SendFileEvent {
     Close,
@@ -15,17 +15,14 @@ pub enum SendFileEvent {
 }
 
 pub struct FileReaderWriter {
-    threads: ThreadPool,
     file_handles: HashMap<String, Sender<SendFileEvent>>,
-    num_workers: usize,
 }
 
 impl FileReaderWriter {
     pub fn new(num_workers: usize) -> Self {
+        let _ = num_workers;
         Self {
-            threads: ThreadPool::with_name("frw".into(), num_workers),
             file_handles: HashMap::new(),
-            num_workers,
         }
     }
 
@@ -104,7 +101,7 @@ impl FileReaderWriter {
         pod.offset = offset;
         let thread_pod = pod.clone();
         let (tx, rx) = async_channel::<SendFileEvent>();
-        self.threads.execute(move || {
+        task::spawn(async move {
             while let Ok(evt) = rx.recv() {
                 match evt {
                     SendFileEvent::Close => {
@@ -126,14 +123,6 @@ impl FileReaderWriter {
         });
 
         self.file_handles.insert(pod.path.to_string(), tx);
-
-        if self.threads.active_count() >= self.num_workers {
-            self.num_workers *= 2;
-            self.threads.set_num_threads(self.num_workers);
-        } else if self.threads.active_count() < (self.num_workers / 2) {
-            self.num_workers /= 2;
-            self.threads.set_num_threads(self.num_workers);
-        }
 
         db::update(&pod.set_state_run())
     }

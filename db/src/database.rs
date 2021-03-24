@@ -1,8 +1,8 @@
 use super::{new_arc_rwlock, Pod};
+use async_std::task;
 use crossbeam_channel::{unbounded, Sender};
 use event::{Dispatch, Listener};
 use std::sync::RwLock;
-use std::thread;
 use std::{collections::HashMap, sync::Arc};
 use strum::AsRefStr;
 
@@ -89,7 +89,7 @@ impl MemDatabase {
         let hm = new_arc_rwlock(HashMap::<UUID, Pod>::new());
         let t_hm = Arc::clone(&hm);
         let t_dispatchers = Arc::clone(&dispatchers);
-        thread::spawn(move || {
+        task::spawn(async move {
             while let Ok(msg) = rx.recv() {
                 let evt = msg.event;
                 let pod = msg.pod;

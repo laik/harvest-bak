@@ -4,7 +4,7 @@ use file::FileReaderWriter;
 use rocket::config::{Config, Environment};
 use rocket::routes;
 use scan::AutoScanner;
-use std::thread;
+use async_std::task;
 
 pub struct Harvest<'a> {
     node_name: &'a str,
@@ -53,7 +53,7 @@ impl<'a> Harvest<'a> {
 
         let mut threads = vec![];
         // start auto scanner with a new thread
-        threads.push(thread::spawn(move || {
+        threads.push(task::spawn(async move {
             let mut scan = match scanner.write() {
                 Ok(it) => it,
                 Err(e) => {
@@ -80,7 +80,7 @@ impl<'a> Harvest<'a> {
             }
         }));
 
-        threads.push(thread::spawn(move || {
+        threads.push(task::spawn(async move {
             let cfg = Config::build(Environment::Production)
                 .address("0.0.0.0")
                 .port(8080)
@@ -97,9 +97,7 @@ impl<'a> Harvest<'a> {
         let node_name = self.node_name.to_string().clone();
         recv_tasks(&api_server_addr, &node_name);
 
-        for item in threads {
-            item.join().unwrap();
-        }
+        for _ in threads {}
 
         task_close();
         Ok(())

@@ -1,12 +1,10 @@
 use common::{Item, Result};
 use kafka_output::KafkaOuput;
 use once_cell::sync::Lazy;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 mod kafka_output;
 

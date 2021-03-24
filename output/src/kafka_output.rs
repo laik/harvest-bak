@@ -1,10 +1,10 @@
 use super::{IOutput, Item, Result};
-use kafka::producer::{Producer, Record, RequiredAcks};
-use std::{collections::HashMap, thread, time::Duration};
-
 use async_std::task;
+use kafka::producer::{Producer, Record, RequiredAcks};
 use ringbuf::{Consumer as RConsumer, Producer as RProducer, RingBuffer};
+
 use std::time::Instant;
+use std::{collections::HashMap, thread, time::Duration};
 
 #[derive(Clone, Debug)]
 struct KafkaOutputConfig {
